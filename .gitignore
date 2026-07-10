@@ -1,0 +1,28 @@
+# Build output
+build/
+out/
+package/
+CMakeUserPresets.json
+
+# Compiled artifacts
+*.dll
+*.exe
+*.exp
+*.lib
+*.obj
+*.pdb
+*.pex
+*.swf
+
+# IDE and operating-system files
+.vs/
+.vscode/
+.idea/
+*.user
+*.suo
+.DS_Store
+Thumbs.db
+
+# Local logs and archives
+*.log
+*.zip
