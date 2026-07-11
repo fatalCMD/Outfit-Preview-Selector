@@ -8,6 +8,7 @@ namespace Settings
 	inline bool loaded = false;
 	inline bool enabled = true;
 	inline bool clearMenuBlur = true;
+	inline bool hideOtherUI = true;
 	inline bool enablePreviewLight = true;
 	inline bool previewLightDefaultOn = false;
 	inline float offsetX = -54.0f;

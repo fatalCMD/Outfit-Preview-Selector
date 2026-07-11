@@ -203,6 +203,18 @@ namespace
 			logger::info("Preview animation state received from MCM: enabled={}", a_params.args[0].GetBool());
 		}
 	};
+
+	class SetCameraOffsets final : public RE::GFxFunctionHandler
+	{
+	public:
+		void Call(Params& a_params) override
+		{
+			if (a_params.argCount < 2 || !a_params.args[0].IsNumber() || !a_params.args[1].IsNumber()) return;
+			const auto side = static_cast<float>(a_params.args[0].GetNumber());
+			const auto height = static_cast<float>(a_params.args[1].GetNumber());
+			if (std::isfinite(side) && std::isfinite(height)) MenuCamera::GetSingleton().SetUserOffsets(side, height);
+		}
+	};
 }
 
 bool ScaleformBridge::Register(RE::GFxMovieView* a_view, RE::GFxValue* a_root)
@@ -225,5 +237,9 @@ bool ScaleformBridge::Register(RE::GFxMovieView* a_view, RE::GFxValue* a_root)
 
 	RE::GFxValue pausePhysicsFunction;
 	a_view->CreateFunction(&pausePhysicsFunction, new PausePreviewPhysics());
-	return a_root->SetMember("PausePreviewPhysics", pausePhysicsFunction);
+	if (!a_root->SetMember("PausePreviewPhysics", pausePhysicsFunction)) return false;
+
+	RE::GFxValue cameraOffsetsFunction;
+	a_view->CreateFunction(&cameraOffsetsFunction, new SetCameraOffsets());
+	return a_root->SetMember("SetCameraOffsets", cameraOffsetsFunction);
 }

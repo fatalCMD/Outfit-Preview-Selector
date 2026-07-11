@@ -6,6 +6,7 @@
 namespace
 {
 	constexpr float PI = 3.14159265358979323846f;
+
 }
 
 MenuCamera& MenuCamera::GetSingleton()
@@ -213,6 +214,13 @@ void MenuCamera::ApplySettings()
 bool MenuCamera::IsActive() const
 {
 	return active;
+}
+
+void MenuCamera::SetUserOffsets(float a_side, float a_height)
+{
+	Settings::offsetX = std::clamp(a_side, -160.0f, 160.0f);
+	Settings::offsetZ = std::clamp(a_height, -120.0f, 120.0f);
+	ApplySettings();
 }
 
 void MenuCamera::SetPreviewLight(bool a_enable)

@@ -27,9 +27,13 @@ private:
 	bool previewRequested = false;
 	bool menuOpen = false;
 	bool allowRotation = false;
+	std::vector<RE::BSFixedString> hiddenMenus;
 
 	void RequestPreview();
 	void StartPreview();
 	void StopPreview();
 	void RotatePreview(float a_direction);
+	void HideOtherMenus();
+	void HideMenu(std::string_view a_menuName);
+	void RestoreOtherMenus();
 };

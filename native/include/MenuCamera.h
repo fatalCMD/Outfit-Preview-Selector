@@ -9,6 +9,7 @@ public:
 	void Stop();
 	void ApplySettings();
 	void SetPreviewLight(bool a_enable);
+	void SetUserOffsets(float a_side, float a_height);
 	[[nodiscard]] bool IsActive() const;
 
 private:

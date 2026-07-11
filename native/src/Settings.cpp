@@ -64,6 +64,8 @@ namespace
 				Settings::enabled = ParseBool(a_value, Settings::enabled);
 			} else if (a_key == "BCLEARMENUBLUR") {
 				Settings::clearMenuBlur = ParseBool(a_value, Settings::clearMenuBlur);
+			} else if (a_key == "BHIDEOTHERUI") {
+				Settings::hideOtherUI = ParseBool(a_value, Settings::hideOtherUI);
 			} else if (a_key == "BENABLEPREVIEWLIGHT") {
 				Settings::enablePreviewLight = ParseBool(a_value, Settings::enablePreviewLight);
 			} else if (a_key == "BPREVIEWLIGHTDEFAULTON") {
@@ -131,6 +133,7 @@ namespace Settings
 	{
 		enabled = true;
 		clearMenuBlur = true;
+		hideOtherUI = true;
 		enablePreviewLight = true;
 		previewLightDefaultOn = false;
 		offsetX = -54.0f;
@@ -190,9 +193,10 @@ namespace Settings
 		}
 
 		logger::info(
-			"[Settings] enabled={} clearBlur={} light={} lightDefault={} offsetX={} offsetY={} offsetZ={} distance={} fov={}",
+			"[Settings] enabled={} clearBlur={} hideOtherUI={} light={} lightDefault={} offsetX={} offsetY={} offsetZ={} distance={} fov={}",
 			enabled,
 			clearMenuBlur,
+			hideOtherUI,
 			enablePreviewLight,
 			previewLightDefaultOn,
 			offsetX,

@@ -6,6 +6,7 @@
 namespace
 {
 	constexpr std::string_view CUSTOM_MENU = "CustomMenu";
+	constexpr std::string_view CURSOR_MENU = "Cursor Menu";
 	constexpr std::string_view OPEN_EVENT = "OPS_NativePreviewOpen";
 	constexpr std::string_view CLOSE_EVENT = "OPS_NativePreviewClose";
 	constexpr std::string_view ROTATE_EVENT = "OPS_RotatePlayer";
@@ -21,6 +22,11 @@ namespace
 	constexpr DWORD MOUSE_MOVE_EVENT_INTERVAL_MS = 16;
 
 	std::atomic_bool blurClearQueued = false;
+
+	bool IsProtectedMenu(std::string_view a_menuName)
+	{
+		return a_menuName == CUSTOM_MENU || a_menuName == CURSOR_MENU;
+	}
 
 	bool IsGamepadCancel(const RE::ButtonEvent& a_button)
 	{
@@ -296,7 +302,16 @@ RE::BSEventNotifyControl EventProcessor::ProcessEvent(
 	const RE::MenuOpenCloseEvent* a_event,
 	RE::BSTEventSource<RE::MenuOpenCloseEvent>*)
 {
-	if (!a_event || a_event->menuName != CUSTOM_MENU) {
+	if (!a_event) {
+		return RE::BSEventNotifyControl::kContinue;
+	}
+	if (a_event->menuName != CUSTOM_MENU) {
+		if (menuOpen && a_event->opening && Settings::hideOtherUI) {
+			const std::string menuName = a_event->menuName.c_str();
+			if (auto* tasks = SKSE::GetTaskInterface()) {
+				tasks->AddUITask([this, menuName] { HideMenu(menuName); });
+			}
+		}
 		return RE::BSEventNotifyControl::kContinue;
 	}
 
@@ -420,6 +435,7 @@ void EventProcessor::StartPreview()
 
 	menuOpen = true;
 	SeedNativeMouse();
+	HideOtherMenus();
 	QueueVanillaMenuBlurClear();
 
 	if (MenuCamera::GetSingleton().IsActive()) {
@@ -438,10 +454,69 @@ void EventProcessor::StopPreview()
 	}
 
 	MenuCamera::GetSingleton().Stop();
+	RestoreOtherMenus();
 	menuOpen = false;
 	allowRotation = false;
 	ClearNativeMouse();
 	QueueVanillaMenuBlurClear();
+}
+
+void EventProcessor::HideOtherMenus()
+{
+	if (!Settings::hideOtherUI) {
+		return;
+	}
+	auto* ui = RE::UI::GetSingleton();
+	if (!ui) {
+		return;
+	}
+	for (auto& [name, entry] : ui->menuMap) {
+		if (IsProtectedMenu(name.c_str()) || !entry.menu || !entry.menu->uiMovie) {
+			continue;
+		}
+		if (entry.menu->uiMovie->GetVisible()) {
+			entry.menu->uiMovie->SetVisible(false);
+			hiddenMenus.push_back(name);
+		}
+	}
+	logger::info("[EventProcessor] Temporarily hid {} other UI movies.", hiddenMenus.size());
+}
+
+void EventProcessor::HideMenu(std::string_view a_menuName)
+{
+	if (!Settings::hideOtherUI || IsProtectedMenu(a_menuName)) {
+		return;
+	}
+	const auto alreadyHidden = std::find_if(hiddenMenus.begin(), hiddenMenus.end(), [&](const auto& name) {
+		return std::string_view(name.c_str()) == a_menuName;
+	});
+	if (alreadyHidden != hiddenMenus.end()) {
+		return;
+	}
+	if (auto* ui = RE::UI::GetSingleton()) {
+		auto movie = ui->GetMovieView(a_menuName);
+		if (movie && movie->GetVisible()) {
+			movie->SetVisible(false);
+			hiddenMenus.emplace_back(a_menuName);
+		}
+	}
+}
+
+void EventProcessor::RestoreOtherMenus()
+{
+	auto* ui = RE::UI::GetSingleton();
+	if (ui) {
+		for (const auto& name : hiddenMenus) {
+			auto movie = ui->GetMovieView(name.c_str());
+			if (movie) {
+				movie->SetVisible(true);
+			}
+		}
+	}
+	if (!hiddenMenus.empty()) {
+		logger::info("[EventProcessor] Restored {} UI movies.", hiddenMenus.size());
+	}
+	hiddenMenus.clear();
 }
 
 void EventProcessor::RotatePreview(float a_direction)
