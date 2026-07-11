@@ -220,7 +220,10 @@ class OutfitPreviewMenu {
 
         equippingIndex = -1;
         equipStartedTime = 0;
-        if (!succeeded) {
+        if (succeeded) {
+            lastApplied = slotIndex;
+            animateCurrent = true;
+        } else {
             noticeMessage = parts.length > 2 ? safe(parts[2]) : "Required pieces are missing.";
             noticeUntil = getTimer() + 6500;
         }
@@ -1061,7 +1064,7 @@ class OutfitPreviewMenu {
     private function clearSelected():Void {
         var slot:Object = getActiveSlot();
         if (slot != undefined) {
-            lastApplied = -1;
+            if (Number(slot.index) == lastApplied) lastApplied = -1;
             sendEvent("OPS_ClearSlot", "", Number(slot.index));
         }
     }
@@ -1139,7 +1142,7 @@ class OutfitPreviewMenu {
 
     private function drawOutfitBadge():Void {
         if (outfitBadge != undefined) outfitBadge.removeMovieClip();
-        var slot:Object = getActiveSlot();
+        var slot:Object = getEquippedSlot();
         if (slot == undefined) return;
 
         outfitBadge = root.createEmptyMovieClip("opsOutfitBadge", 2);
@@ -1191,9 +1194,9 @@ class OutfitPreviewMenu {
         while (i < last) {
             if (cardView) {
                 var local:Number = i - first;
-                drawCard(slots[i], 78 + (local % 2) * 176, y + Math.floor(local / 2) * 80, 170, 72, i == selected && listRow < slots.length, Number(slots[i].index) == lastApplied, Number(slots[i].index) == equippingIndex);
+                drawCard(slots[i], 78 + (local % 2) * 176, y + Math.floor(local / 2) * 80, 170, 72, i == selected && listRow < slots.length, Number(slots[i].index) == lastApplied, isEquippingSlot(slots[i]));
             } else {
-                drawSlot(slots[i], 78, y + (i - first) * 40, 348, 34, i == selected && listRow < slots.length, Number(slots[i].index) == lastApplied, Number(slots[i].index) == equippingIndex);
+                drawSlot(slots[i], 78, y + (i - first) * 40, 348, 34, i == selected && listRow < slots.length, Number(slots[i].index) == lastApplied, isEquippingSlot(slots[i]));
             }
             i++;
         }
@@ -1677,6 +1680,22 @@ class OutfitPreviewMenu {
             return slots[selected];
         }
         return undefined;
+    }
+
+    private function getEquippedSlot():Object {
+        if (lastApplied < 0) return undefined;
+        var i:Number = 0;
+        while (i < slots.length) {
+            if (slots[i].ready && Number(slots[i].index) == lastApplied) return slots[i];
+            i++;
+        }
+        return undefined;
+    }
+
+    private function isEquippingSlot(slot:Object):Boolean {
+        if (equippingIndex < 0 || slot == undefined || !slot.ready) return false;
+        var index:Number = Number(slot.index);
+        return !isNaN(index) && index >= 0 && index < 50 && index == equippingIndex;
     }
 
     private function sendEvent(name:String, strArg:String, numArg:Number):Void {

@@ -5,12 +5,14 @@
 - Added persistent List and Card views.
 - Added automatic and selectable outfit icons.
 - Added full controller navigation for Card View.
-- Added camera position settings and depth of field.
+- Added camera position settings.
 - Added an animated badge showing the selected outfit.
 - Added animated gold highlighting for menu controls.
 - Added optional hiding of other UI while OPS is open.
 - Improved outfit-switching safety and fixed cursor jitter.
 - Fixed the SkyUI cursor being hidden with other HUD elements.
+- Fixed a crash caused by the experimental depth-of-field object.
+- Fixed empty cards sharing the equipping animation and kept the outfit badge bound to worn gear.
 
 ## 1.1.0 - 2026-07-11
 

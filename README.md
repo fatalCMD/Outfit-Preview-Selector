@@ -20,7 +20,6 @@ The current source targets Skyrim Special Edition 1.5.97 with SKSE64 2.0.20. Ann
 - Saved MCM controls for preview camera horizontal position and height.
 - Automatic restoration of the last list/card layout, also configurable from MCM.
 - Reversible suppression of other registered HUD/mod overlay movies while OPS is open.
-- Configurable player-targeted native depth of field for a sharp character over a softened world background.
 - Optional player animation during the paused preview.
 - Guarded Faster HDT-SMP 2.5 preview-physics support.
 - MCM configuration for controls and behavior.
@@ -43,14 +42,9 @@ List/Card preference, preview-camera horizontal position, and preview-camera hei
 ```ini
 [General]
 bHideOtherUI = 1
-bEnablePreviewDOF = 1
-
-[Camera]
-fDOFStrength = 0.72
-fDOFRange = 240.0
 ```
 
-Set `bHideOtherUI=0` if a registered overlay must remain visible. Set `bEnablePreviewDOF=0` for ENB or upscaler configurations that provide their own depth of field.
+Set `bHideOtherUI=0` if a registered overlay must remain visible.
 
 ## Source layout
 
