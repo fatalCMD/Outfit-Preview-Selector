@@ -9,6 +9,7 @@ public:
 	void Stop();
 	void ApplySettings();
 	void SetPreviewLight(bool a_enable);
+	void SetUserOffsets(float a_side, float a_height);
 	[[nodiscard]] bool IsActive() const;
 
 private:
@@ -26,6 +27,8 @@ private:
 	RE::NiPoint2 freeRotation{};
 	RE::NiPoint3 posOffsetExpected{};
 	RE::NiPointer<RE::BSLight> savedLight;
+	RE::ImageSpaceModifierInstanceDOF* previewDOF = nullptr;
+	RE::ImageSpaceModifierInstanceDOF* savedDynamicDOF = nullptr;
 	RE::NiColor savedLightAmbient{};
 	RE::NiColor savedLightDiffuse{};
 	RE::NiPoint3 savedLightRadius{};
@@ -68,5 +71,7 @@ private:
 	void ApplyPreviewLight(RE::PlayerCharacter* a_player);
 	void ApplyCameraValues(RE::PlayerCharacter* a_player, RE::PlayerCamera* a_camera, RE::ThirdPersonState* a_thirdState);
 	void RestorePreviewLight();
+	void ApplyPreviewDepthOfField(RE::PlayerCharacter* a_player);
+	void RestorePreviewDepthOfField();
 	void ResetSavedState();
 };

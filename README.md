@@ -2,19 +2,25 @@
 
 Outfit Preview Selector (OPS) is a Skyrim Special Edition outfit manager built around a paused third-person character preview. It provides fifty named outfit slots, applies outfits without closing the selector, and highlights an outfit only while the player is wearing exactly its saved armor set.
 
-Current public version: **1.1.0**
+Current public version: **1.2.0**
 
 The current source targets Skyrim Special Edition 1.5.97 with SKSE64 2.0.20. Anniversary Edition and Skyrim VR are not currently supported.
 
 ## Features
 
 - Fifty persistent, renameable outfit slots presented across five ten-outfit pages.
-- Mouse and controller-friendly page arrows in the selector footer.
+- Switchable list and card layouts with automatic or manually selected outfit-category icons.
+- Full 2D controller card navigation with a physical `Y` / Triangle edit shortcut and on-screen prompt.
+- Compact mouse and controller-friendly pagination with adjacent arrows.
 - Inventory preflight with a themed missing-item notice that leaves current gear untouched.
 - Row-level equipping feedback while armor and physics nodes rebuild.
 - Outfit switching without closing the selector.
 - Exact worn-outfit highlighting.
 - Paused third-person preview with mouse and gamepad rotation.
+- Saved MCM controls for preview camera horizontal position and height.
+- Automatic restoration of the last list/card layout, also configurable from MCM.
+- Reversible suppression of other registered HUD/mod overlay movies while OPS is open.
+- Configurable player-targeted native depth of field for a sharp character over a softened world background.
 - Optional player animation during the paused preview.
 - Guarded Faster HDT-SMP 2.5 preview-physics support.
 - MCM configuration for controls and behavior.
@@ -29,6 +35,22 @@ The current source targets Skyrim Special Edition 1.5.97 with SKSE64 2.0.20. Ann
 - Microsoft Visual C++ Redistributable 2015–2022 x64
 
 Optional integrations include [Faster HDT-SMP](https://www.nexusmods.com/skyrimspecialedition/mods/57339) and [SmoothCam](https://www.nexusmods.com/skyrimspecialedition/mods/41252).
+
+## OPS 1.2 configuration
+
+List/Card preference, preview-camera horizontal position, and preview-camera height are saved through MCM. Native presentation options are available in `SKSE/Plugins/OutfitPreviewSelectorCamera.ini`:
+
+```ini
+[General]
+bHideOtherUI = 1
+bEnablePreviewDOF = 1
+
+[Camera]
+fDOFStrength = 0.72
+fDOFRange = 240.0
+```
+
+Set `bHideOtherUI=0` if a registered overlay must remain visible. Set `bEnablePreviewDOF=0` for ENB or upscaler configurations that provide their own depth of field.
 
 ## Source layout
 

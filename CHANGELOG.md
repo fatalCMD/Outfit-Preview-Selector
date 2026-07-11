@@ -1,5 +1,32 @@
 # Changelog
 
+## 1.2.0 - 2026-07-11
+
+### Added
+
+- Added persistent List and Card views with ten presets per page and automatic restoration of the last selected layout.
+- Added semantic outfit icons with Auto Detect, Armor, Heavy, Light, Arcane, and Clothing choices saved per preset.
+- Added full two-dimensional controller navigation in Card View and a physical `Y` / Triangle shortcut for opening the selected preset editor.
+- Added saved MCM controls for the preview camera's horizontal position and height.
+- Added reversible suppression of other registered Skyrim and mod UI movies while OPS is open.
+- Added configurable player-targeted depth of field to keep the preview character sharp while softening the world behind them.
+- Added an animated right-side badge displaying the selected outfit's name, slot number, and category icon.
+- Added a centered, letter-spaced **GEAR PRESETS** title and gold-sweep opening animation.
+
+### Changed
+
+- Reworked pagination into a compact counter with adjacent previous and next controls.
+- Replaced controller pointers with animated double-gold focus frames for cards, list rows, Edit, Close, view switching, and pagination controls.
+- Made List View focus column-specific: the Apply column highlights the full row, while the Edit column highlights only its button.
+- Removed the Card View Edit button; controller users open Edit with `Y` / Triangle, while mouse users can switch to List View.
+- Locks all preset switching while an outfit change is already in progress.
+- Positions the selected-outfit badge approximately 20% above the bottom edge.
+
+### Fixed
+
+- Removed the fallback cursor that could jitter after keyboard-only menu opens; SkyUI again owns the only visible pointer.
+- Prevented saved List/Card preferences from flashing the wrong layout during the next menu load.
+
 ## 1.1.0 - 2026-07-11
 
 ### Added

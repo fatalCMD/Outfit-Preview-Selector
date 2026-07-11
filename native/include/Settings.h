@@ -8,6 +8,8 @@ namespace Settings
 	inline bool loaded = false;
 	inline bool enabled = true;
 	inline bool clearMenuBlur = true;
+	inline bool hideOtherUI = true;
+	inline bool enablePreviewDOF = true;
 	inline bool enablePreviewLight = true;
 	inline bool previewLightDefaultOn = false;
 	inline float offsetX = -54.0f;
@@ -15,6 +17,8 @@ namespace Settings
 	inline float offsetZ = -24.0f;
 	inline float distance = 182.0f;
 	inline float fov = 60.0f;
+	inline float dofStrength = 0.72f;
+	inline float dofRange = 240.0f;
 	inline float lightStrength = 1.25f;
 	inline float lightAmbient = 0.08f;
 	inline float lightRadius = 420.0f;

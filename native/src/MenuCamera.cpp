@@ -6,6 +6,12 @@
 namespace
 {
 	constexpr float PI = 3.14159265358979323846f;
+
+	RE::ImageSpaceModifierInstanceDOF*& GetDynamicDOFSlot(RE::PlayerCharacter* a_player)
+	{
+		return REL::RelocateMemberIfNewer<RE::ImageSpaceModifierInstanceDOF*>(
+			SKSE::RUNTIME_SSE_1_6_629, a_player, 0x6F0, 0x6F8);
+	}
 }
 
 MenuCamera& MenuCamera::GetSingleton()
@@ -88,6 +94,7 @@ bool MenuCamera::Start()
 
 	active = true;
 	ApplyCameraValues(player, camera, thirdState);
+	ApplyPreviewDepthOfField(player);
 	if (Settings::previewLightDefaultOn) {
 		SetPreviewLight(true);
 	}
@@ -100,6 +107,7 @@ void MenuCamera::Stop()
 	if (!active) {
 		return;
 	}
+	RestorePreviewDepthOfField();
 
 	auto* player = RE::PlayerCharacter::GetSingleton();
 	auto* camera = RE::PlayerCamera::GetSingleton();
@@ -205,6 +213,7 @@ void MenuCamera::ApplySettings()
 	}
 
 	ApplyCameraValues(player, camera, thirdState);
+	ApplyPreviewDepthOfField(player);
 	if (previewLightEnabled) {
 		ApplyPreviewLight(player);
 	}
@@ -213,6 +222,13 @@ void MenuCamera::ApplySettings()
 bool MenuCamera::IsActive() const
 {
 	return active;
+}
+
+void MenuCamera::SetUserOffsets(float a_side, float a_height)
+{
+	Settings::offsetX = std::clamp(a_side, -160.0f, 160.0f);
+	Settings::offsetZ = std::clamp(a_height, -120.0f, 120.0f);
+	ApplySettings();
 }
 
 void MenuCamera::SetPreviewLight(bool a_enable)
@@ -398,6 +414,61 @@ void MenuCamera::RestorePreviewLight()
 	previewLightEnabled = false;
 }
 
+void MenuCamera::ApplyPreviewDepthOfField(RE::PlayerCharacter* a_player)
+{
+	if (!Settings::enablePreviewDOF || !a_player || !a_player->Get3D()) {
+		return;
+	}
+	if (!previewDOF) {
+		auto* memory = RE::malloc<RE::ImageSpaceModifierInstanceDOF>();
+		if (!memory) {
+			logger::warn("[MenuCamera] Could not allocate the preview DOF modifier.");
+			return;
+		}
+		std::memset(memory, 0, sizeof(RE::ImageSpaceModifierInstanceDOF));
+		REL::Relocation<std::uintptr_t> dofVTable{ RE::VTABLE_ImageSpaceModifierInstanceDOF[0] };
+		*reinterpret_cast<std::uintptr_t*>(memory) = dofVTable.address();
+		previewDOF = memory;
+		previewDOF->strength = 1.0f;
+		previewDOF->target.reset(a_player->Get3D());
+		previewDOF->age = 0.0f;
+		previewDOF->flags = 0;
+		previewDOF->duration = 3600.0f;
+		std::fill(std::begin(previewDOF->data.data), std::end(previewDOF->data.data), 0.0f);
+		previewDOF->data.data[RE::ImageSpaceModData::kDOFStrength] = std::clamp(Settings::dofStrength, 0.0f, 1.0f);
+		previewDOF->data.data[RE::ImageSpaceModData::kDOFDistance] = 0.0f;
+		previewDOF->data.data[RE::ImageSpaceModData::kDOFRange] = (std::max)(Settings::dofRange, 1.0f);
+		previewDOF->data.data[RE::ImageSpaceModData::kDOFMode] = static_cast<float>(
+			RE::ImageSpaceModifierInstanceDOF::DepthOfFieldMode::kBack);
+		auto& dynamicDOF = GetDynamicDOFSlot(a_player);
+		savedDynamicDOF = dynamicDOF;
+		dynamicDOF = previewDOF;
+		logger::info("[MenuCamera] Player-targeted background depth of field enabled.");
+	}
+	previewDOF->target.reset(a_player->Get3D());
+	reinterpret_cast<RE::ImageSpaceModifierInstance*>(previewDOF)->Apply();
+}
+
+void MenuCamera::RestorePreviewDepthOfField()
+{
+	if (!previewDOF) {
+		return;
+	}
+	previewDOF->strength = 0.0f;
+	previewDOF->data.data[RE::ImageSpaceModData::kDOFStrength] = 0.0f;
+	previewDOF->duration = 0.0f;
+	previewDOF->age = 1.0f;
+	reinterpret_cast<RE::ImageSpaceModifierInstance*>(previewDOF)->Apply();
+	if (auto* player = RE::PlayerCharacter::GetSingleton(); player && GetDynamicDOFSlot(player) == previewDOF) {
+		GetDynamicDOFSlot(player) = savedDynamicDOF;
+	}
+	previewDOF->target.reset(static_cast<RE::NiAVObject*>(nullptr));
+	RE::free(previewDOF);
+	previewDOF = nullptr;
+	savedDynamicDOF = nullptr;
+	logger::info("[MenuCamera] Preview depth of field released.");
+}
+
 void MenuCamera::ResetSavedState()
 {
 	overShoulderCombatPosX = nullptr;
@@ -416,4 +487,6 @@ void MenuCamera::ResetSavedState()
 	previewLightEnabled = false;
 	lightStateCaptured = false;
 	savedLight.reset(static_cast<RE::BSLight*>(nullptr));
+	previewDOF = nullptr;
+	savedDynamicDOF = nullptr;
 }

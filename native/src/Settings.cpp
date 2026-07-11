@@ -64,6 +64,10 @@ namespace
 				Settings::enabled = ParseBool(a_value, Settings::enabled);
 			} else if (a_key == "BCLEARMENUBLUR") {
 				Settings::clearMenuBlur = ParseBool(a_value, Settings::clearMenuBlur);
+			} else if (a_key == "BHIDEOTHERUI") {
+				Settings::hideOtherUI = ParseBool(a_value, Settings::hideOtherUI);
+			} else if (a_key == "BENABLEPREVIEWDOF") {
+				Settings::enablePreviewDOF = ParseBool(a_value, Settings::enablePreviewDOF);
 			} else if (a_key == "BENABLEPREVIEWLIGHT") {
 				Settings::enablePreviewLight = ParseBool(a_value, Settings::enablePreviewLight);
 			} else if (a_key == "BPREVIEWLIGHTDEFAULTON") {
@@ -104,6 +108,10 @@ namespace
 			Settings::distance = ParseFloat(a_value, Settings::distance);
 		} else if (a_key == "FFOV") {
 			Settings::fov = ParseFloat(a_value, Settings::fov);
+		} else if (a_key == "FDOFSTRENGTH") {
+			Settings::dofStrength = ParseFloat(a_value, Settings::dofStrength);
+		} else if (a_key == "FDOFRANGE") {
+			Settings::dofRange = ParseFloat(a_value, Settings::dofRange);
 		}
 	}
 }
@@ -131,6 +139,8 @@ namespace Settings
 	{
 		enabled = true;
 		clearMenuBlur = true;
+		hideOtherUI = true;
+		enablePreviewDOF = true;
 		enablePreviewLight = true;
 		previewLightDefaultOn = false;
 		offsetX = -54.0f;
@@ -138,6 +148,8 @@ namespace Settings
 		offsetZ = -24.0f;
 		distance = 182.0f;
 		fov = 60.0f;
+		dofStrength = 0.72f;
+		dofRange = 240.0f;
 		lightStrength = 1.25f;
 		lightAmbient = 0.08f;
 		lightRadius = 420.0f;
@@ -190,15 +202,19 @@ namespace Settings
 		}
 
 		logger::info(
-			"[Settings] enabled={} clearBlur={} light={} lightDefault={} offsetX={} offsetY={} offsetZ={} distance={} fov={}",
+			"[Settings] enabled={} clearBlur={} hideOtherUI={} previewDOF={} light={} lightDefault={} offsetX={} offsetY={} offsetZ={} distance={} fov={} dofStrength={} dofRange={}",
 			enabled,
 			clearMenuBlur,
+			hideOtherUI,
+			enablePreviewDOF,
 			enablePreviewLight,
 			previewLightDefaultOn,
 			offsetX,
 			offsetY,
 			offsetZ,
 			distance,
-			fov);
+			fov,
+			dofStrength,
+			dofRange);
 	}
 }

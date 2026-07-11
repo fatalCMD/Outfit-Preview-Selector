@@ -55,6 +55,7 @@ Form[] Outfit49
 Form[] Outfit50
 
 string[] Property OutfitNames Auto
+string[] Property OutfitIcons Auto
 int Property Hotkey Auto
 bool Property SettingsInitialized Auto
 bool Property ShowNotifications Auto
@@ -62,6 +63,9 @@ bool Property UnequipBeforeEquip Auto
 bool Property DebugFocusHighlight Auto
 bool Property AnimatePlayerPreview Auto
 float Property MenuScale Auto
+bool Property CardView Auto
+float Property CameraSide Auto
+float Property CameraHeight Auto
 int Property SettingsVersion Auto
 
 int _hotkeyOptionID = -1
@@ -71,6 +75,9 @@ int _unequipOptionID = -1
 int _debugFocusOptionID = -1
 int _animateOptionID = -1
 int _scaleOptionID = -1
+int _cardViewOptionID = -1
+int _cameraSideOptionID = -1
+int _cameraHeightOptionID = -1
 int[] _saveOptionIDs
 int[] _equipOptionIDs
 float _lastPlayerX = 0.0
@@ -110,6 +117,7 @@ EndEvent
 Event OnPageReset(string page)
     _debugFocusOptionID = -1
     _animateOptionID = -1
+    _cardViewOptionID = -1
     If page == "Outfits"
         SetCursorFillMode(LEFT_TO_RIGHT)
         AddHeaderOption("Selector")
@@ -136,6 +144,9 @@ Event OnPageReset(string page)
         _unequipOptionID = AddToggleOption("Unequip current gear first", UnequipBeforeEquip)
         _animateOptionID = AddToggleOption("Animate player in preview", AnimatePlayerPreview)
         _scaleOptionID = AddSliderOption("Menu scale", MenuScale * 100.0, "{0}%")
+        _cardViewOptionID = AddToggleOption("Default card view", CardView)
+        _cameraSideOptionID = AddSliderOption("Camera horizontal", CameraSide, "{0}")
+        _cameraHeightOptionID = AddSliderOption("Camera height", CameraHeight, "{0}")
     EndIf
 EndEvent
 
@@ -154,6 +165,13 @@ Event OnOptionSelect(int option)
     ElseIf option == _animateOptionID
         AnimatePlayerPreview = !AnimatePlayerPreview
         SetToggleOptionValue(_animateOptionID, AnimatePlayerPreview)
+        If _menuOpen
+            ApplyMenuSettings()
+        EndIf
+        Return
+    ElseIf option == _cardViewOptionID
+        CardView = !CardView
+        SetToggleOptionValue(_cardViewOptionID, CardView)
         If _menuOpen
             ApplyMenuSettings()
         EndIf
@@ -185,6 +203,16 @@ Event OnOptionSliderOpen(int option)
         SetSliderDialogDefaultValue(90.0)
         SetSliderDialogRange(45.0, 100.0)
         SetSliderDialogInterval(5.0)
+    ElseIf option == _cameraSideOptionID
+        SetSliderDialogStartValue(CameraSide)
+        SetSliderDialogDefaultValue(-54.0)
+        SetSliderDialogRange(-160.0, 160.0)
+        SetSliderDialogInterval(2.0)
+    ElseIf option == _cameraHeightOptionID
+        SetSliderDialogStartValue(CameraHeight)
+        SetSliderDialogDefaultValue(-24.0)
+        SetSliderDialogRange(-120.0, 120.0)
+        SetSliderDialogInterval(2.0)
     EndIf
 EndEvent
 
@@ -192,6 +220,18 @@ Event OnOptionSliderAccept(int option, float value)
     If option == _scaleOptionID
         MenuScale = value / 100.0
         SetSliderOptionValue(_scaleOptionID, value, "{0}%")
+        If _menuOpen
+            ApplyMenuSettings()
+        EndIf
+    ElseIf option == _cameraSideOptionID
+        CameraSide = value
+        SetSliderOptionValue(_cameraSideOptionID, value, "{0}")
+        If _menuOpen
+            ApplyMenuSettings()
+        EndIf
+    ElseIf option == _cameraHeightOptionID
+        CameraHeight = value
+        SetSliderOptionValue(_cameraHeightOptionID, value, "{0}")
         If _menuOpen
             ApplyMenuSettings()
         EndIf
@@ -226,7 +266,10 @@ Function InitSettings()
         DebugFocusHighlight = false
         AnimatePlayerPreview = true
         MenuScale = 0.90
-        SettingsVersion = 34
+        CardView = false
+        CameraSide = -54.0
+        CameraHeight = -24.0
+        SettingsVersion = 37
     EndIf
     If SettingsVersion < 21
         MenuScale = 0.8
@@ -284,6 +327,15 @@ Function InitSettings()
     If SettingsVersion < 35
         SettingsVersion = 35
     EndIf
+    If SettingsVersion < 36
+        CardView = false
+        CameraSide = -54.0
+        CameraHeight = -24.0
+        SettingsVersion = 36
+    EndIf
+    If SettingsVersion < 37
+        SettingsVersion = 37
+    EndIf
     DebugFocusHighlight = false
     If Hotkey == 0
         Hotkey = 79
@@ -313,10 +365,22 @@ Function InitArrays()
             oldIndex += 1
         EndWhile
     EndIf
+    string[] oldIcons = OutfitIcons
+    If !OutfitIcons || OutfitIcons.Length < 50
+        OutfitIcons = new string[50]
+        int oldIconIndex = 0
+        While oldIcons && oldIconIndex < oldIcons.Length && oldIconIndex < OutfitIcons.Length
+            OutfitIcons[oldIconIndex] = oldIcons[oldIconIndex]
+            oldIconIndex += 1
+        EndWhile
+    EndIf
     int i = 0
     While i < 50
         If OutfitNames[i] == ""
             OutfitNames[i] = "Outfit " + (i + 1)
+        EndIf
+        If OutfitIcons[i] == ""
+            OutfitIcons[i] = "auto"
         EndIf
         i += 1
     EndWhile
@@ -411,6 +475,8 @@ Function RegisterMenuEvents()
     RegisterForModEvent("OPS_MenuClosed", "OnMenuClosed")
     RegisterForModEvent("OPS_NativeMouseClick", "OnNativeMouseClick")
     RegisterForModEvent("OPS_NativeMouseMove", "OnNativeMouseMove")
+    RegisterForModEvent("OPS_SetCardView", "OnSetCardView")
+    RegisterForModEvent("OPS_SetIcon", "OnSetIcon")
 EndFunction
 
 Event OnMenuReady(string eventName, string strArg, float numArg, Form sender)
@@ -426,7 +492,24 @@ Function ApplyMenuSettings()
     UI.InvokeFloat("CustomMenu", "_root.main.setMenuScale", MenuScale)
     UI.InvokeBool("CustomMenu", "_root.main.setDebugFocusHighlight", false)
     UI.InvokeBool("CustomMenu", "_root.main.setIdleAnimationEnabled", AnimatePlayerPreview)
+    UI.InvokeBool("CustomMenu", "_root.main.setCardView", CardView)
+    UI.InvokeString("CustomMenu", "_root.main.setCameraOffsets", CameraSide + "|" + CameraHeight)
 EndFunction
+
+Event OnSetCardView(string eventName, string strArg, float numArg, Form sender)
+    CardView = numArg > 0.0
+EndEvent
+
+Event OnSetIcon(string eventName, string strArg, float numArg, Form sender)
+    int index = numArg as int
+    If index < 0 || index >= 50
+        Return
+    EndIf
+    string icon = NormalizeIcon(strArg)
+    OutfitIcons[index] = icon
+    UpdateMenuRowCache(index)
+    RefreshMenuSlots()
+EndEvent
 
 Event OnApplySlot(string eventName, string strArg, float numArg, Form sender)
     If !_menuOpen
@@ -568,7 +651,21 @@ Function UpdateMenuRowCache(int index)
         ready = 1
     EndIf
     _outfitCounts[index] = count
-    _menuRows[index] = index + "|" + GetOutfitName(index) + "|" + FormatCount(count) + "|" + ready + "|" + armorRating + "|" + itemText
+    _menuRows[index] = index + "|" + GetOutfitName(index) + "|" + FormatCount(count) + "|" + ready + "|" + armorRating + "|" + itemText + "|" + GetOutfitIcon(index)
+EndFunction
+
+string Function GetOutfitIcon(int index)
+    If OutfitIcons && index >= 0 && index < OutfitIcons.Length
+        Return NormalizeIcon(OutfitIcons[index])
+    EndIf
+    Return "auto"
+EndFunction
+
+string Function NormalizeIcon(string icon)
+    If icon == "armor" || icon == "heavy" || icon == "light" || icon == "arcane" || icon == "clothing"
+        Return icon
+    EndIf
+    Return "auto"
 EndFunction
 
 int Function GetCachedOutfitCount(int index)
