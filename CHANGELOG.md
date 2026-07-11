@@ -15,6 +15,7 @@
 - Fixed empty cards sharing the equipping animation and kept the outfit badge bound to worn gear.
 - Fixed a crash when switching between List and Card views.
 - Fixed a crash when leaving an outfit's Edit page.
+- Centralized and coalesced menu redraws to prevent unsafe Scaleform panel rebuilds.
 
 ## 1.1.0 - 2026-07-11
 

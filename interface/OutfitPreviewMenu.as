@@ -55,6 +55,9 @@ class OutfitPreviewMenu {
     private var noticeMessage:String;
     private var noticeUntil:Number;
     private var cardView:Boolean;
+    private var redrawPending:Boolean;
+    private var rendering:Boolean;
+    private var introPending:Boolean;
 
     public function OutfitPreviewMenu(rootClip:MovieClip) {
         root = rootClip;
@@ -112,13 +115,13 @@ class OutfitPreviewMenu {
         noticeMessage = "";
         noticeUntil = 0;
         cardView = false;
+        redrawPending = false;
+        rendering = false;
+        introPending = false;
 
         installKeys();
         installMouse();
-        draw();
-        if (panel != undefined) {
-            panel._alpha = 0;
-        }
+        renderPanel();
         disableFocusTarget(root);
         if (_root != undefined) {
             disableFocusTarget(_root);
@@ -197,11 +200,11 @@ class OutfitPreviewMenu {
         listRow = selected;
         currentPage = Math.floor(selected / pageSize);
         initialized = true;
-        draw();
         if (!introPlayed) {
             introPlayed = true;
-            animatePanelIntro();
+            introPending = true;
         }
+        draw();
     }
 
     public function setCurrentOutfit(slotIndex:Number):Void {
@@ -248,7 +251,6 @@ class OutfitPreviewMenu {
     public function setCardView(enabled:Boolean):Void {
         cardView = enabled;
         draw();
-        if (!initialized && panel != undefined) panel._alpha = 0;
     }
 
     public function setCameraOffsets(raw:String):Void {
@@ -1105,6 +1107,27 @@ class OutfitPreviewMenu {
     }
 
     private function draw():Void {
+        if (closing || redrawPending) {
+            return;
+        }
+
+        redrawPending = true;
+        var self:OutfitPreviewMenu = this;
+        var task:MovieClip = root.createEmptyMovieClip("opsDeferredRedraw", 9992);
+        task.onEnterFrame = function():Void {
+            delete this.onEnterFrame;
+            self.redrawPending = false;
+            this.removeMovieClip();
+            self.renderPanel();
+        };
+    }
+
+    private function renderPanel():Void {
+        if (closing || rendering) {
+            return;
+        }
+
+        rendering = true;
         var savedRenameText:String = undefined;
         if (editingName && renameField != undefined) {
             savedRenameText = renameField.text;
@@ -1139,6 +1162,14 @@ class OutfitPreviewMenu {
             Selection.setSelection(len, len);
         }
         Mouse.show();
+        rendering = false;
+
+        if (!initialized && panel != undefined) {
+            panel._alpha = 0;
+        } else if (introPending) {
+            introPending = false;
+            animatePanelIntro();
+        }
     }
 
     private function drawOutfitBadge():Void {
