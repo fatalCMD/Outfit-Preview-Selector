@@ -1,14 +1,17 @@
 # Outfit Preview Selector
 
-Outfit Preview Selector (OPS) is a Skyrim Special Edition outfit manager built around a paused third-person character preview. It provides ten named outfit slots, applies outfits without closing the selector, and highlights an outfit only while the player is wearing exactly its saved armor set.
+Outfit Preview Selector (OPS) is a Skyrim Special Edition outfit manager built around a paused third-person character preview. It provides fifty named outfit slots, applies outfits without closing the selector, and highlights an outfit only while the player is wearing exactly its saved armor set.
 
-Current public version: **1.0.0**
+Current public version: **1.1.0**
 
 The current source targets Skyrim Special Edition 1.5.97 with SKSE64 2.0.20. Anniversary Edition and Skyrim VR are not currently supported.
 
 ## Features
 
-- Ten persistent, renameable outfit slots.
+- Fifty persistent, renameable outfit slots presented across five ten-outfit pages.
+- Mouse and controller-friendly page arrows in the selector footer.
+- Inventory preflight with a themed missing-item notice that leaves current gear untouched.
+- Row-level equipping feedback while armor and physics nodes rebuild.
 - Outfit switching without closing the selector.
 - Exact worn-outfit highlighting.
 - Paused third-person preview with mouse and gamepad rotation.
@@ -34,6 +37,14 @@ Optional integrations include [Faster HDT-SMP](https://www.nexusmods.com/skyrims
 - `papyrus/` — Papyrus source for outfit storage, MCM, and menu coordination.
 
 Compiled binaries, the plugin file, and third-party interface assets are intentionally not included in this source repository.
+
+## Interface build
+
+Compile the ActionScript menu with a **1280x720** movie header. The interface coordinates and native mouse mapping use that stage size:
+
+```powershell
+mtasc -version 8 -header 1280:720:30 -cp interface -swf menu.swf -main interface/Main.as
+```
 
 ## Native build
 
