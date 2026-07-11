@@ -38,6 +38,19 @@ class OutfitPreviewMenu {
     private var animateCurrent:Boolean;
     private var idleAnimationEnabled:Boolean;
     private var lastIdleAnimationTime:Number;
+    private var pageSize:Number;
+    private var currentPage:Number;
+    private var pageChangePending:Boolean;
+    private var lastPageChangeTime:Number;
+    private var pendingPageDirection:Number;
+    private var slotActionPending:Boolean;
+    private var pendingSlotAction:String;
+    private var pendingSlotIndex:Number;
+    private var lastSlotActionTime:Number;
+    private var equippingIndex:Number;
+    private var equipStartedTime:Number;
+    private var noticeMessage:String;
+    private var noticeUntil:Number;
 
     public function OutfitPreviewMenu(rootClip:MovieClip) {
         root = rootClip;
@@ -79,6 +92,19 @@ class OutfitPreviewMenu {
         animateCurrent = false;
         idleAnimationEnabled = true;
         lastIdleAnimationTime = 0;
+        pageSize = 10;
+        currentPage = 0;
+        pageChangePending = false;
+        lastPageChangeTime = -999;
+        pendingPageDirection = 0;
+        slotActionPending = false;
+        pendingSlotAction = "";
+        pendingSlotIndex = -1;
+        lastSlotActionTime = -999;
+        equippingIndex = -1;
+        equipStartedTime = 0;
+        noticeMessage = "";
+        noticeUntil = 0;
 
         installKeys();
         installMouse();
@@ -108,6 +134,7 @@ class OutfitPreviewMenu {
             Mouse.show();
             self.pollEscape();
             self.tickPlayerIdleAnimation();
+            self.tickEquipStatus();
             self.updateNativeCursor();
         };
 
@@ -129,7 +156,7 @@ class OutfitPreviewMenu {
         var rows:Array = new Array();
         var i:Number = 0;
         if (arguments.length > 1) {
-            while (i < arguments.length && i < 10) {
+            while (i < arguments.length && i < 50) {
                 rows.push(String(arguments[i]));
                 i++;
             }
@@ -137,7 +164,7 @@ class OutfitPreviewMenu {
             if (typeof(raw) == "string") {
                 rows.push(String(raw));
             } else {
-                while (i < raw.length && i < 10) {
+                while (i < raw.length && i < 50) {
                     rows.push(String(raw[i]));
                     i++;
                 }
@@ -145,7 +172,7 @@ class OutfitPreviewMenu {
         }
 
         i = 0;
-        while (i < rows.length && i < 10) {
+        while (i < rows.length && i < 50) {
             slots.push(parseSlot(String(rows[i])));
             i++;
         }
@@ -161,6 +188,7 @@ class OutfitPreviewMenu {
         }
         editIndex = selected;
         listRow = selected;
+        currentPage = Math.floor(selected / pageSize);
         initialized = true;
         draw();
         if (!introPlayed) {
@@ -170,7 +198,7 @@ class OutfitPreviewMenu {
     }
 
     public function setCurrentOutfit(slotIndex:Number):Void {
-        if (isNaN(slotIndex) || slotIndex < 0 || slotIndex >= 10) {
+        if (isNaN(slotIndex) || slotIndex < 0 || slotIndex >= 50) {
             slotIndex = -1;
         }
         var changed:Boolean = lastApplied != slotIndex;
@@ -179,6 +207,21 @@ class OutfitPreviewMenu {
             animateCurrent = slotIndex >= 0;
             draw();
         }
+    }
+
+    public function setEquipResult(raw:String):Void {
+        var parts:Array = safe(raw).split("|");
+        var slotIndex:Number = Number(parts[0]);
+        var succeeded:Boolean = Number(parts[1]) == 1;
+        if (isNaN(slotIndex) || slotIndex != equippingIndex) return;
+
+        equippingIndex = -1;
+        equipStartedTime = 0;
+        if (!succeeded) {
+            noticeMessage = parts.length > 2 ? safe(parts[2]) : "Required pieces are missing.";
+            noticeUntil = getTimer() + 6500;
+        }
+        draw();
     }
 
     public function setIdleAnimationEnabled(enabled:Boolean):Void {
@@ -278,15 +321,10 @@ class OutfitPreviewMenu {
     }
 
     private function updateNativeCursor():Void {
-        if (!nativeMouseReady) {
-            hideNativeCursor();
-            return;
-        }
-
-        ensureNativeCursor();
-        nativeCursor._x = nativeMouseStageX;
-        nativeCursor._y = nativeMouseStageY;
-        nativeCursor._visible = true;
+        // SkyUI already supplies the visible menu cursor. Native coordinates
+        // are retained for reliable hit testing, but drawing another cursor
+        // here produces the doubled gold/white pointer seen by some users.
+        hideNativeCursor();
         Mouse.show();
     }
 
@@ -705,13 +743,24 @@ class OutfitPreviewMenu {
         if (slots.length == 0) {
             return;
         }
-        var maxRow:Number = slots.length;
-        listRow += delta;
-        if (listRow < 0) {
-            listRow = 0;
-        }
-        if (listRow > maxRow) {
-            listRow = maxRow;
+        var first:Number = currentPage * pageSize;
+        var last:Number = Math.min(first + pageSize, slots.length) - 1;
+        if (listRow < first || listRow > slots.length + 1) {
+            listRow = first;
+        } else if (delta > 0) {
+            if (listRow < last) listRow++;
+            else if (listRow == last) {
+                listRow = slots.length;
+                listColumn = currentPage > 0 ? 0 : 1;
+            }
+            else if (listRow == slots.length) listRow = slots.length + 1;
+        } else if (delta < 0) {
+            if (listRow == slots.length + 1) {
+                listRow = slots.length;
+                listColumn = currentPage < getPageCount() - 1 ? 1 : 0;
+            }
+            else if (listRow == slots.length) listRow = last;
+            else if (listRow > first) listRow--;
         }
         if (listRow < slots.length) {
             selected = listRow;
@@ -767,7 +816,7 @@ class OutfitPreviewMenu {
             moveDetailHorizontal(delta);
             return;
         }
-        if (listRow >= slots.length) {
+        if (listRow > slots.length) {
             return;
         }
         listColumn += delta;
@@ -788,6 +837,8 @@ class OutfitPreviewMenu {
         }
         if (listRow >= slots.length) {
             if (listRow == slots.length) {
+                requestPageChange(listColumn == 0 ? -1 : 1);
+            } else if (listRow == slots.length + 1) {
                 closeMenu();
             }
             return;
@@ -878,10 +929,34 @@ class OutfitPreviewMenu {
         if (!slot.ready) {
             return;
         }
-        lastApplied = Number(slot.index);
-        animateCurrent = true;
+        pausePreviewPhysics(1200);
+        equippingIndex = Number(slot.index);
+        equipStartedTime = getTimer();
         draw();
         sendEvent("OPS_ApplySlot", "", Number(slot.index));
+    }
+
+    private function tickEquipStatus():Void {
+        var now:Number = getTimer();
+        if (equippingIndex >= 0 && equipStartedTime > 0 && now - equipStartedTime > 5000) {
+            equippingIndex = -1;
+            equipStartedTime = 0;
+            draw();
+        }
+        if (noticeMessage != "" && noticeUntil > 0 && now >= noticeUntil) {
+            noticeMessage = "";
+            noticeUntil = 0;
+            draw();
+        }
+    }
+
+    private function pausePreviewPhysics(duration:Number):Void {
+        if (_global.skse != undefined && _global.skse.plugins != undefined) {
+            var api:Object = _global.skse.plugins.OutfitPreviewSelectorCamera;
+            if (api != undefined && api.PausePreviewPhysics != undefined) {
+                api.PausePreviewPhysics(duration);
+            }
+        }
     }
 
     private function saveSelected():Void {
@@ -970,24 +1045,34 @@ class OutfitPreviewMenu {
     }
 
     private function drawList():Void {
-        placeAsset(panel, "components/panel_bg.swf", 50, 64, 420, 594, 90);
+        placeAsset(panel, "components/panel_bg.swf", 50, 64, 420, 644, 90);
         placeAsset(panel, "components/panel_cols.swf", 70, 116, 370, 28, 70);
-        rect(panel, 58, 72, 398, 576, 0x000000, 62, 0x6E685A, 58, 1);
+        rect(panel, 58, 72, 398, 626, 0x000000, 62, 0x6E685A, 58, 1);
+        drawOrnateFrame(panel, 62, 76, 390, 618);
         rect(panel, 76, 118, 350, 1, 0x827868, 52, -1, 0, 0);
         addText(panel, "title", 78, 86, 260, 26, "Outfits", 22, 0xEEE8DC, true, "left");
         addText(panel, "mark", 368, 91, 56, 18, "OPS", 12, 0xB8A074, false, "right");
 
         var y:Number = 138;
-        var i:Number = 0;
-        while (i < slots.length && i < 10) {
-            drawSlot(slots[i], 78, y + i * 40, 348, 34, i == selected && listRow < slots.length, Number(slots[i].index) == lastApplied);
+        var first:Number = currentPage * pageSize;
+        var last:Number = Math.min(first + pageSize, slots.length);
+        var i:Number = first;
+        while (i < last) {
+            drawSlot(slots[i], 78, y + (i - first) * 40, 348, 34, i == selected && listRow < slots.length, Number(slots[i].index) == lastApplied, Number(slots[i].index) == equippingIndex);
             i++;
         }
         animateCurrent = false;
 
-        rect(panel, 76, 560, 350, 1, 0x827868, 52, -1, 0, 0);
-        placeAsset(panel, "components/bar_1.swf", 70, 572, 362, 64, 72);
-        drawButton("close", 78, 584, 348, 34, "Close", "close", -1, listRow == slots.length);
+        rect(panel, 76, 544, 350, 1, 0x827868, 42, -1, 0, 0);
+        drawPageArrow("pagePrev", 78, 558, 58, 34, -1, currentPage > 0, listRow == slots.length && listColumn == 0);
+        drawPageArrow("pageNext", 368, 558, 58, 34, 1, currentPage < getPageCount() - 1, listRow == slots.length && listColumn == 1);
+        addText(panel, "page", 146, 562, 212, 22, "PAGE " + (currentPage + 1) + "  /  " + getPageCount(), 12, 0xC8BA98, false, "center");
+        rect(panel, 76, 620, 350, 1, 0x827868, 52, -1, 0, 0);
+        placeAsset(panel, "components/bar_1.swf", 70, 632, 362, 64, 72);
+        drawButton("close", 78, 644, 348, 34, "Close", "close", -1, listRow == slots.length + 1);
+        if (noticeMessage != "") {
+            drawMissingNotice();
+        }
     }
 
     private function drawDetail():Void {
@@ -1000,6 +1085,7 @@ class OutfitPreviewMenu {
 
         placeAsset(panel, "components/panel_bg.swf", 50, 64, 440, 594, 90);
         rect(panel, 58, 72, 418, 576, 0x000000, 64, 0x6E685A, 58, 1);
+        drawOrnateFrame(panel, 62, 76, 410, 568);
         addText(panel, "title", 78, 86, 280, 26, twoDigits(slot.index + 1) + "  " + clip(slot.name, 24), 21, 0xEEE8DC, true, "left");
         addText(panel, "count", 358, 91, 82, 18, slot.count, 12, 0xC8BA98, false, "right");
         addText(panel, "armor", 260, 91, 88, 18, "AR " + slot.armor, 12, 0xC8BA98, false, "right");
@@ -1040,17 +1126,17 @@ class OutfitPreviewMenu {
         drawButton("close", 78, 584, 362, 34, "Close", "close", -1, detailFocus == 5);
     }
 
-    private function drawSlot(slot:Object, x:Number, y:Number, w:Number, h:Number, active:Boolean, worn:Boolean):Void {
+    private function drawSlot(slot:Object, x:Number, y:Number, w:Number, h:Number, active:Boolean, worn:Boolean, equipping:Boolean):Void {
         var row:MovieClip = panel.createEmptyMovieClip("slot" + nextDepth, nextDepth++);
         row._x = x;
         row._y = y;
         disableFocusTarget(row);
         var debugActive:Boolean = active && debugFocusHighlight;
-        var fill:Number = worn ? 0x14263D : (debugActive ? 0x11161C : 0x07090C);
-        var fillAlpha:Number = worn ? 92 : (debugActive ? 78 : 74);
-        var stroke:Number = worn ? 0x91B9DC : (debugActive ? 0x827868 : -1);
-        var strokeAlpha:Number = worn ? 100 : (debugActive ? 90 : 0);
-        var strokeWidth:Number = worn ? 2 : (debugActive ? 1 : 0);
+        var fill:Number = equipping ? 0x29200E : (worn ? 0x14263D : (debugActive ? 0x11161C : 0x07090C));
+        var fillAlpha:Number = equipping ? 94 : (worn ? 92 : (debugActive ? 78 : 74));
+        var stroke:Number = equipping ? 0xD2B56A : (worn ? 0x91B9DC : (debugActive ? 0x827868 : -1));
+        var strokeAlpha:Number = equipping ? 90 : (worn ? 100 : (debugActive ? 90 : 0));
+        var strokeWidth:Number = equipping ? 1 : (worn ? 2 : (debugActive ? 1 : 0));
         var textColor:Number = worn ? 0xEEF7FF : 0xEEE8DC;
         var metaColor:Number = worn ? 0xB7CEE3 : (slot.ready ? 0xC8BA98 : 0x8C9298);
         rect(row, 0, 0, w, h, fill, fillAlpha, stroke, strokeAlpha, strokeWidth);
@@ -1061,13 +1147,20 @@ class OutfitPreviewMenu {
         }
         addText(row, "num", 12, 7, 30, 20, twoDigits(slot.index + 1), 14, textColor, true, "left");
         addText(row, "name", 50, 7, 118, 20, clip(slot.name, 17), 14, textColor, worn, "left");
-        addText(row, "count", 170, 8, 52, 18, shortCount(slot.count), 11, metaColor, false, "right");
-        addText(row, "armor", 224, 8, 42, 18, "AR " + slot.armor, 11, metaColor, false, "right");
+        if (equipping) {
+            drawEquipIndicator(row, 180, Math.floor(h / 2));
+            addText(row, "equipping", 194, 8, 72, 18, "EQUIPPING", 10, 0xD8C184, true, "left");
+        } else {
+            addText(row, "count", 170, 8, 52, 18, shortCount(slot.count), 11, metaColor, false, "right");
+            addText(row, "armor", 224, 8, 42, 18, "AR " + slot.armor, 11, metaColor, false, "right");
+        }
 
         if (worn && animateCurrent) {
             animateOutfitRow(row);
             animateMysticShimmer(row, w, h);
         }
+
+        if (equipping) return;
 
         var self:OutfitPreviewMenu = this;
         var idx:Number = slot.index;
@@ -1081,10 +1174,7 @@ class OutfitPreviewMenu {
                 return;
             }
             self.noteMouseInput(false);
-            self.listColumn = 0;
-            self.listRow = idx;
-            self.selectIndex(idx, false);
-            self.applySelected();
+            self.requestSlotAction("applySlot", idx);
         };
 
         drawEditButton(x + 270, y + 4, idx, active && listColumn == 1);
@@ -1110,11 +1200,42 @@ class OutfitPreviewMenu {
                 return;
             }
             self.noteMouseInput(false);
-            self.listColumn = 1;
-            self.listRow = idx;
-            self.selectIndex(idx, false);
-            self.openDetail(idx);
+            self.requestSlotAction("editSlot", idx);
         };
+    }
+
+    private function drawEquipIndicator(parent:MovieClip, centerX:Number, centerY:Number):Void {
+        var spinner:MovieClip = parent.createEmptyMovieClip("equipSpinner" + nextDepth, nextDepth++);
+        spinner._x = centerX;
+        spinner._y = centerY;
+        spinner.lineStyle(2, 0xD8C184, 92, true, "normal", "none", "miter", 3);
+        spinner.moveTo(0, -6);
+        spinner.lineTo(0, -2);
+        spinner.moveTo(6, 0);
+        spinner.lineTo(2, 0);
+        spinner.moveTo(0, 6);
+        spinner.lineTo(0, 2);
+        spinner.moveTo(-6, 0);
+        spinner.lineTo(-2, 0);
+        spinner.onEnterFrame = function():Void {
+            this._rotation += 14;
+        };
+    }
+
+    private function drawMissingNotice():Void {
+        var notice:MovieClip = panel.createEmptyMovieClip("missingNotice" + nextDepth, nextDepth++);
+        notice._x = 86;
+        notice._y = 292;
+        rect(notice, 0, 0, 330, 132, 0x120D08, 98, 0xD2B56A, 94, 2);
+        rect(notice, 5, 5, 320, 122, 0x000000, 0, 0x7D693D, 68, 1);
+        drawMysticMark(notice, 20, 20);
+        drawMysticMark(notice, 310, 20);
+        addText(notice, "noticeTitle", 34, 14, 262, 22, "ENSEMBLE INCOMPLETE", 15, 0xE7D49A, true, "center");
+        var message:TextField = addText(notice, "noticeMessage", 22, 45, 286, 50, noticeMessage, 12, 0xEEE8DC, false, "center");
+        message.multiline = true;
+        message.wordWrap = true;
+        addText(notice, "noticeHint", 22, 104, 286, 16, "Current attire remains unchanged  -  click to dismiss", 9, 0xA89362, false, "center");
+        addClickZone(86, 292, 330, 132, "dismissNotice", -1);
     }
 
     private function drawItem(label:String, x:Number, y:Number, w:Number, h:Number, index:Number):Void {
@@ -1123,6 +1244,31 @@ class OutfitPreviewMenu {
         row._y = y;
         rect(row, 0, 0, w, h, index % 2 == 0 ? 0x0D0E0F : 0x111214, 46, -1, 0, 0);
         addText(row, "itemText", 12, 4, w - 24, 16, clip(label, 45), 12, 0xEEE8DC, false, "left");
+    }
+
+    private function drawPageArrow(name:String, x:Number, y:Number, w:Number, h:Number, direction:Number, enabled:Boolean, focused:Boolean):Void {
+        var arrow:MovieClip = panel.createEmptyMovieClip(name + nextDepth, nextDepth++);
+        arrow._x = x;
+        arrow._y = y;
+        disableFocusTarget(arrow);
+        var edge:Number = enabled ? 0xB89A55 : 0x4A453A;
+        rect(arrow, 0, 0, w, h, 0x0D0E0F, enabled ? 78 : 46, edge, enabled ? 82 : 42, focused ? 2 : 1);
+        var cx:Number = Math.floor(w / 2);
+        var cy:Number = Math.floor(h / 2);
+        arrow.lineStyle(2, enabled ? 0xD5B96C : 0x5F5A50, enabled ? 96 : 48, true, "normal", "none", "miter", 3);
+        arrow.moveTo(cx - direction * 2, cy - 7);
+        arrow.lineTo(cx + direction * 6, cy);
+        arrow.lineTo(cx - direction * 2, cy + 7);
+        if (enabled) {
+            addClickZone(x, y, w, h, direction < 0 ? "prevPage" : "nextPage", -1);
+            var self:OutfitPreviewMenu = this;
+            arrow.useHandCursor = true;
+            arrow.onRelease = function():Void {
+                if (self.skipClipRelease()) return;
+                self.noteMouseInput(false);
+                self.requestPageChange(direction);
+            };
+        }
     }
 
     private function drawButton(name:String, x:Number, y:Number, w:Number, h:Number, label:String, action:String, idx:Number, focused:Boolean):Void {
@@ -1162,7 +1308,10 @@ class OutfitPreviewMenu {
     private function focusAction(action:String, idx:Number):Void {
         if (viewMode == "list") {
             if (action == "close") {
+                listRow = slots.length + 1;
+            } else if (action == "prevPage" || action == "nextPage") {
                 listRow = slots.length;
+                listColumn = action == "prevPage" ? 0 : 1;
             } else if (idx >= 0) {
                 listRow = idx;
                 selectIndex(idx, false);
@@ -1178,7 +1327,11 @@ class OutfitPreviewMenu {
     }
 
     private function runAction(action:String, idx:Number):Void {
-        if (action == "save") {
+        if (action == "dismissNotice") {
+            noticeMessage = "";
+            noticeUntil = 0;
+            draw();
+        } else if (action == "save") {
             saveSelected();
         } else if (action == "close") {
             closeMenu();
@@ -1200,7 +1353,77 @@ class OutfitPreviewMenu {
             }
         } else if (action == "detail") {
             openDetail(idx);
+        } else if (action == "prevPage") {
+            requestPageChange(-1);
+        } else if (action == "nextPage") {
+            requestPageChange(1);
         }
+    }
+
+    private function getPageCount():Number {
+        return Math.max(1, Math.ceil(slots.length / pageSize));
+    }
+
+    private function requestPageChange(delta:Number):Void {
+        if (pageChangePending || getTimer() - lastPageChangeTime < 350) return;
+        var target:Number = currentPage + delta;
+        if (target < 0 || target >= getPageCount()) return;
+
+        pageChangePending = true;
+        pendingPageDirection = delta;
+        var self:OutfitPreviewMenu = this;
+        var task:MovieClip = root.createEmptyMovieClip("opsDeferredPageChange", 9995);
+        task.onEnterFrame = function():Void {
+            delete this.onEnterFrame;
+            var requestedDirection:Number = self.pendingPageDirection;
+            self.pendingPageDirection = 0;
+            self.pageChangePending = false;
+            this.removeMovieClip();
+            self.changePage(requestedDirection);
+        };
+    }
+
+    private function changePage(delta:Number):Void {
+        var target:Number = currentPage + delta;
+        if (target < 0 || target >= getPageCount() || target == currentPage) return;
+        lastPageChangeTime = getTimer();
+        currentPage = target;
+        selected = Math.min(currentPage * pageSize, slots.length - 1);
+        editIndex = selected;
+        listRow = selected;
+        listColumn = 0;
+        draw();
+    }
+
+    private function requestSlotAction(action:String, idx:Number):Void {
+        if (slotActionPending || getTimer() - lastSlotActionTime < 350) return;
+        slotActionPending = true;
+        pendingSlotAction = action;
+        pendingSlotIndex = idx;
+        var self:OutfitPreviewMenu = this;
+        var task:MovieClip = root.createEmptyMovieClip("opsDeferredSlotAction", 9994);
+        task.onEnterFrame = function():Void {
+            delete this.onEnterFrame;
+            var requestedAction:String = self.pendingSlotAction;
+            var requestedIndex:Number = self.pendingSlotIndex;
+            self.pendingSlotAction = "";
+            self.pendingSlotIndex = -1;
+            self.slotActionPending = false;
+            self.lastSlotActionTime = getTimer();
+            this.removeMovieClip();
+
+            if (requestedAction == "applySlot") {
+                self.listColumn = 0;
+                self.listRow = requestedIndex;
+                self.selectIndex(requestedIndex, false);
+                self.applySelected();
+            } else if (requestedAction == "editSlot") {
+                self.listColumn = 1;
+                self.listRow = requestedIndex;
+                self.selectIndex(requestedIndex, false);
+                self.openDetail(requestedIndex);
+            }
+        };
     }
 
     private function selectIndex(slotIndex:Number, redraw:Boolean):Void {
@@ -1298,15 +1521,9 @@ class OutfitPreviewMenu {
                 noteMouseInput(false);
                 lastMouseHitTime = getTimer();
                 if (zone.action == "applySlot") {
-                    listColumn = 0;
-                    listRow = Number(zone.idx);
-                    selectIndex(Number(zone.idx), false);
-                    applySelected();
+                    requestSlotAction("applySlot", Number(zone.idx));
                 } else if (zone.action == "editSlot") {
-                    listColumn = 1;
-                    listRow = Number(zone.idx);
-                    selectIndex(Number(zone.idx), false);
-                    openDetail(Number(zone.idx));
+                    requestSlotAction("editSlot", Number(zone.idx));
                 } else {
                     focusAction(String(zone.action), Number(zone.idx));
                     runAction(String(zone.action), Number(zone.idx));
@@ -1346,14 +1563,14 @@ class OutfitPreviewMenu {
                 return;
             }
             if (listRow < slots.length) {
-                cy = 155 + selected * 40;
+                cy = 155 + (selected - currentPage * pageSize) * 40;
                 cx = listColumn == 1 ? 340 : 62;
             } else if (listRow == slots.length) {
-                cy = 598;
-                cx = 62;
+                cy = 568;
+                cx = listColumn == 1 ? 352 : 62;
             } else {
-                cy = 598;
-                cx = 242;
+                cy = 658;
+                cx = 62;
             }
         } else {
             if (detailFocus == 0) {
@@ -1495,6 +1712,47 @@ class OutfitPreviewMenu {
         mark.lineTo(centerX - 4, centerY);
         mark.lineTo(centerX, centerY - 5);
         mark.endFill();
+    }
+
+    private function drawOrnateFrame(parent:MovieClip, x:Number, y:Number, w:Number, h:Number):Void {
+        rect(parent, x, y, w, h, 0x000000, 0, 0xC4A45A, 78, 1);
+        rect(parent, x + 4, y + 4, w - 8, h - 8, 0x000000, 0, 0x7D693D, 48, 1);
+        drawCornerOrnament(parent, x, y, 1, 1);
+        drawCornerOrnament(parent, x + w, y, -1, 1);
+        drawCornerOrnament(parent, x, y + h, 1, -1);
+        drawCornerOrnament(parent, x + w, y + h, -1, -1);
+    }
+
+    private function drawCornerOrnament(parent:MovieClip, x:Number, y:Number, sx:Number, sy:Number):Void {
+        var corner:MovieClip = parent.createEmptyMovieClip("corner" + nextDepth, nextDepth++);
+        corner._x = x;
+        corner._y = y;
+        corner._xscale = sx * 100;
+        corner._yscale = sy * 100;
+        corner.lineStyle(1, 0xD2B56A, 88, true, "normal", "none", "miter", 3);
+        corner.moveTo(0, 22);
+        corner.lineTo(7, 15);
+        corner.lineTo(7, 7);
+        corner.lineTo(15, 7);
+        corner.lineTo(22, 0);
+        corner.moveTo(4, 29);
+        corner.lineTo(12, 21);
+        corner.lineTo(12, 12);
+        corner.lineTo(21, 12);
+        corner.lineTo(29, 4);
+        corner.beginFill(0xB89A55, 72);
+        corner.moveTo(7, 7);
+        corner.lineTo(11, 3);
+        corner.lineTo(15, 7);
+        corner.lineTo(11, 11);
+        corner.lineTo(7, 7);
+        corner.endFill();
+        corner.lineStyle(1, 0x9D8248, 70, true, "normal", "none", "miter", 3);
+        corner.moveTo(15, 18);
+        corner.lineTo(20, 14);
+        corner.lineTo(24, 18);
+        corner.lineTo(20, 22);
+        corner.lineTo(15, 18);
     }
 
     public function setDebugFocusHighlight(enabled:Boolean):Void {

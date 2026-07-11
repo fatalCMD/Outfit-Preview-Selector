@@ -11,6 +11,49 @@ Form[] Property Outfit8 Auto
 Form[] Property Outfit9 Auto
 Form[] Property Outfit10 Auto
 
+; Slots 11-50 are script-backed persistent variables. Slots 1-10 remain
+; properties so existing plugin records and saved outfits stay compatible.
+Form[] Outfit11
+Form[] Outfit12
+Form[] Outfit13
+Form[] Outfit14
+Form[] Outfit15
+Form[] Outfit16
+Form[] Outfit17
+Form[] Outfit18
+Form[] Outfit19
+Form[] Outfit20
+Form[] Outfit21
+Form[] Outfit22
+Form[] Outfit23
+Form[] Outfit24
+Form[] Outfit25
+Form[] Outfit26
+Form[] Outfit27
+Form[] Outfit28
+Form[] Outfit29
+Form[] Outfit30
+Form[] Outfit31
+Form[] Outfit32
+Form[] Outfit33
+Form[] Outfit34
+Form[] Outfit35
+Form[] Outfit36
+Form[] Outfit37
+Form[] Outfit38
+Form[] Outfit39
+Form[] Outfit40
+Form[] Outfit41
+Form[] Outfit42
+Form[] Outfit43
+Form[] Outfit44
+Form[] Outfit45
+Form[] Outfit46
+Form[] Outfit47
+Form[] Outfit48
+Form[] Outfit49
+Form[] Outfit50
+
 string[] Property OutfitNames Auto
 int Property Hotkey Auto
 bool Property SettingsInitialized Auto
@@ -39,6 +82,7 @@ int _escapeKey = 1
 int _escapeAsciiKey = 27
 string[] _menuRows
 int[] _outfitCounts
+string _lastApplyMessage = ""
 
 Event OnGameReload()
     Parent.OnGameReload()
@@ -54,8 +98,8 @@ Event OnConfigInit()
     Pages = new string[2]
     Pages[0] = "Outfits"
     Pages[1] = "Settings"
-    _saveOptionIDs = new int[10]
-    _equipOptionIDs = new int[10]
+    _saveOptionIDs = new int[50]
+    _equipOptionIDs = new int[50]
     InitSettings()
     InitArrays()
     BuildMenuRowsCache()
@@ -73,7 +117,7 @@ Event OnPageReset(string page)
         _openOptionID = AddTextOption("Open Outfit Preview Selector", "Open")
         AddEmptyOption()
         int i = 0
-        While i < 10
+        While i < 50
             If CountOutfitItems(i) > 0
                 _equipOptionIDs[i] = AddTextOption(GetOutfitName(i), "Equip")
             Else
@@ -121,7 +165,7 @@ Event OnOptionSelect(int option)
     EndIf
 
     int i = 0
-    While i < 10
+    While i < 50
         If option == _saveOptionIDs[i]
             SaveCurrentOutfit(i)
             ForcePageReset()
@@ -237,6 +281,9 @@ Function InitSettings()
         AnimatePlayerPreview = true
         SettingsVersion = 34
     EndIf
+    If SettingsVersion < 35
+        SettingsVersion = 35
+    EndIf
     DebugFocusHighlight = false
     If Hotkey == 0
         Hotkey = 79
@@ -251,11 +298,23 @@ Function InitSettings()
 EndFunction
 
 Function InitArrays()
-    If !OutfitNames || OutfitNames.Length < 10
-        OutfitNames = new string[10]
+    If !_saveOptionIDs || _saveOptionIDs.Length < 50
+        _saveOptionIDs = new int[50]
+    EndIf
+    If !_equipOptionIDs || _equipOptionIDs.Length < 50
+        _equipOptionIDs = new int[50]
+    EndIf
+    string[] oldNames = OutfitNames
+    If !OutfitNames || OutfitNames.Length < 50
+        OutfitNames = new string[50]
+        int oldIndex = 0
+        While oldNames && oldIndex < oldNames.Length && oldIndex < OutfitNames.Length
+            OutfitNames[oldIndex] = oldNames[oldIndex]
+            oldIndex += 1
+        EndWhile
     EndIf
     int i = 0
-    While i < 10
+    While i < 50
         If OutfitNames[i] == ""
             OutfitNames[i] = "Outfit " + (i + 1)
         EndIf
@@ -271,6 +330,46 @@ Function InitArrays()
     Outfit8 = EnsureArray(Outfit8)
     Outfit9 = EnsureArray(Outfit9)
     Outfit10 = EnsureArray(Outfit10)
+    Outfit11 = EnsureArray(Outfit11)
+    Outfit12 = EnsureArray(Outfit12)
+    Outfit13 = EnsureArray(Outfit13)
+    Outfit14 = EnsureArray(Outfit14)
+    Outfit15 = EnsureArray(Outfit15)
+    Outfit16 = EnsureArray(Outfit16)
+    Outfit17 = EnsureArray(Outfit17)
+    Outfit18 = EnsureArray(Outfit18)
+    Outfit19 = EnsureArray(Outfit19)
+    Outfit20 = EnsureArray(Outfit20)
+    Outfit21 = EnsureArray(Outfit21)
+    Outfit22 = EnsureArray(Outfit22)
+    Outfit23 = EnsureArray(Outfit23)
+    Outfit24 = EnsureArray(Outfit24)
+    Outfit25 = EnsureArray(Outfit25)
+    Outfit26 = EnsureArray(Outfit26)
+    Outfit27 = EnsureArray(Outfit27)
+    Outfit28 = EnsureArray(Outfit28)
+    Outfit29 = EnsureArray(Outfit29)
+    Outfit30 = EnsureArray(Outfit30)
+    Outfit31 = EnsureArray(Outfit31)
+    Outfit32 = EnsureArray(Outfit32)
+    Outfit33 = EnsureArray(Outfit33)
+    Outfit34 = EnsureArray(Outfit34)
+    Outfit35 = EnsureArray(Outfit35)
+    Outfit36 = EnsureArray(Outfit36)
+    Outfit37 = EnsureArray(Outfit37)
+    Outfit38 = EnsureArray(Outfit38)
+    Outfit39 = EnsureArray(Outfit39)
+    Outfit40 = EnsureArray(Outfit40)
+    Outfit41 = EnsureArray(Outfit41)
+    Outfit42 = EnsureArray(Outfit42)
+    Outfit43 = EnsureArray(Outfit43)
+    Outfit44 = EnsureArray(Outfit44)
+    Outfit45 = EnsureArray(Outfit45)
+    Outfit46 = EnsureArray(Outfit46)
+    Outfit47 = EnsureArray(Outfit47)
+    Outfit48 = EnsureArray(Outfit48)
+    Outfit49 = EnsureArray(Outfit49)
+    Outfit50 = EnsureArray(Outfit50)
 EndFunction
 
 Form[] Function EnsureArray(Form[] items)
@@ -335,8 +434,13 @@ Event OnApplySlot(string eventName, string strArg, float numArg, Form sender)
     EndIf
     int index = numArg as int
     _currentOutfit = index
-    ApplyOutfit(index)
+    bool applied = ApplyOutfit(index)
     UpdateCurrentOutfit(true)
+    int appliedValue = 0
+    If applied
+        appliedValue = 1
+    EndIf
+    UI.InvokeString("CustomMenu", "_root.main.setEquipResult", index + "|" + appliedValue + "|" + _lastApplyMessage)
 EndEvent
 
 Event OnSaveSlot(string eventName, string strArg, float numArg, Form sender)
@@ -403,31 +507,31 @@ Function CloseSelectorState()
 EndFunction
 
 Function RefreshMenuSlots()
-    If !_menuRows || _menuRows.Length < 10
+    If !_menuRows || _menuRows.Length < 50
         BuildMenuRowsCache()
     EndIf
     UI.InvokeStringA("CustomMenu", "_root.main.setSlots", _menuRows)
 EndFunction
 
 Function BuildMenuRowsCache()
-    _menuRows = new string[10]
-    _outfitCounts = new int[10]
+    _menuRows = new string[50]
+    _outfitCounts = new int[50]
     int i = 0
-    While i < 10
+    While i < 50
         UpdateMenuRowCache(i)
         i += 1
     EndWhile
 EndFunction
 
 Function UpdateMenuRowCache(int index)
-    If index < 0 || index >= 10
+    If index < 0 || index >= 50
         Return
     EndIf
-    If !_menuRows || _menuRows.Length < 10
-        _menuRows = new string[10]
+    If !_menuRows || _menuRows.Length < 50
+        _menuRows = new string[50]
     EndIf
-    If !_outfitCounts || _outfitCounts.Length < 10
-        _outfitCounts = new int[10]
+    If !_outfitCounts || _outfitCounts.Length < 50
+        _outfitCounts = new int[50]
     EndIf
 
     Form[] items = GetOutfitArray(index)
@@ -468,10 +572,10 @@ Function UpdateMenuRowCache(int index)
 EndFunction
 
 int Function GetCachedOutfitCount(int index)
-    If !_outfitCounts || _outfitCounts.Length < 10
+    If !_outfitCounts || _outfitCounts.Length < 50
         BuildMenuRowsCache()
     EndIf
-    If index < 0 || index >= 10
+    If index < 0 || index >= 50
         Return 0
     EndIf
     Return _outfitCounts[index]
@@ -489,12 +593,12 @@ EndFunction
 
 int Function FindCurrentOutfit()
     Form[] wornArmor = GetCurrentArmor()
-    If _currentOutfit >= 0 && _currentOutfit < 10 && OutfitMatchesCurrentArmor(_currentOutfit, wornArmor)
+    If _currentOutfit >= 0 && _currentOutfit < 50 && OutfitMatchesCurrentArmor(_currentOutfit, wornArmor)
         Return _currentOutfit
     EndIf
 
     int i = 0
-    While i < 10
+    While i < 50
         If OutfitMatchesCurrentArmor(i, wornArmor)
             Return i
         EndIf
@@ -555,7 +659,7 @@ int Function CountForms(Form[] items)
 EndFunction
 
 Function SaveCurrentOutfit(int index)
-    If index < 0 || index >= 10
+    If index < 0 || index >= 50
         Return
     EndIf
     Form[] items = GetOutfitArray(index)
@@ -585,10 +689,10 @@ Function SaveCurrentOutfit(int index)
 EndFunction
 
 Function RenameOutfit(int index, string newName)
-    If index < 0 || index >= 10
+    If index < 0 || index >= 50
         Return
     EndIf
-    If !OutfitNames || OutfitNames.Length < 10
+    If !OutfitNames || OutfitNames.Length < 50
         InitArrays()
     EndIf
     If newName == ""
@@ -600,7 +704,7 @@ Function RenameOutfit(int index, string newName)
 EndFunction
 
 Function ClearOutfit(int index)
-    If index < 0 || index >= 10
+    If index < 0 || index >= 50
         Return
     EndIf
     Form[] items = GetOutfitArray(index)
@@ -616,12 +720,49 @@ Function ClearOutfit(int index)
     Notify("Cleared " + GetOutfitName(index))
 EndFunction
 
-Function ApplyOutfit(int index)
-    If index < 0 || index >= 10 || GetCachedOutfitCount(index) == 0
-        Return
+bool Function ApplyOutfit(int index)
+    _lastApplyMessage = ""
+    If index < 0 || index >= 50 || GetCachedOutfitCount(index) == 0
+        _lastApplyMessage = "Outfit is empty"
+        Return false
     EndIf
     Form[] items = GetOutfitArray(index)
     Actor player = Game.GetPlayer()
+
+    int missingCount = 0
+    int namedMissing = 0
+    string missingNames = ""
+    int checkIndex = 0
+    While checkIndex < items.Length
+        If items[checkIndex] && player.GetItemCount(items[checkIndex]) <= 0
+            missingCount += 1
+            If namedMissing < 4
+                string missingName = items[checkIndex].GetName()
+                If missingName == ""
+                    missingName = "Unknown item"
+                EndIf
+                If missingNames == ""
+                    missingNames = missingName
+                Else
+                    missingNames = missingNames + ", " + missingName
+                EndIf
+                namedMissing += 1
+            EndIf
+        EndIf
+        checkIndex += 1
+    EndWhile
+
+    If missingCount > 0
+        If missingCount > namedMissing
+            missingNames = missingNames + " +" + (missingCount - namedMissing) + " more"
+        EndIf
+        _lastApplyMessage = "Missing: " + missingNames
+        If !_menuOpen
+            Notify("Cannot equip " + GetOutfitName(index) + ". " + _lastApplyMessage)
+        EndIf
+        Return false
+    EndIf
+
     If UnequipBeforeEquip
         UnequipCurrentArmor(player)
     EndIf
@@ -633,6 +774,8 @@ Function ApplyOutfit(int index)
         i += 1
     EndWhile
     player.QueueNiNodeUpdate()
+    _lastApplyMessage = "Equipped " + GetOutfitName(index)
+    Return true
 EndFunction
 
 Function UnequipCurrentArmor(Actor player)
@@ -667,6 +810,86 @@ Form[] Function GetOutfitArray(int index)
         Return Outfit9
     ElseIf index == 9
         Return Outfit10
+    ElseIf index == 10
+        Return Outfit11
+    ElseIf index == 11
+        Return Outfit12
+    ElseIf index == 12
+        Return Outfit13
+    ElseIf index == 13
+        Return Outfit14
+    ElseIf index == 14
+        Return Outfit15
+    ElseIf index == 15
+        Return Outfit16
+    ElseIf index == 16
+        Return Outfit17
+    ElseIf index == 17
+        Return Outfit18
+    ElseIf index == 18
+        Return Outfit19
+    ElseIf index == 19
+        Return Outfit20
+    ElseIf index == 20
+        Return Outfit21
+    ElseIf index == 21
+        Return Outfit22
+    ElseIf index == 22
+        Return Outfit23
+    ElseIf index == 23
+        Return Outfit24
+    ElseIf index == 24
+        Return Outfit25
+    ElseIf index == 25
+        Return Outfit26
+    ElseIf index == 26
+        Return Outfit27
+    ElseIf index == 27
+        Return Outfit28
+    ElseIf index == 28
+        Return Outfit29
+    ElseIf index == 29
+        Return Outfit30
+    ElseIf index == 30
+        Return Outfit31
+    ElseIf index == 31
+        Return Outfit32
+    ElseIf index == 32
+        Return Outfit33
+    ElseIf index == 33
+        Return Outfit34
+    ElseIf index == 34
+        Return Outfit35
+    ElseIf index == 35
+        Return Outfit36
+    ElseIf index == 36
+        Return Outfit37
+    ElseIf index == 37
+        Return Outfit38
+    ElseIf index == 38
+        Return Outfit39
+    ElseIf index == 39
+        Return Outfit40
+    ElseIf index == 40
+        Return Outfit41
+    ElseIf index == 41
+        Return Outfit42
+    ElseIf index == 42
+        Return Outfit43
+    ElseIf index == 43
+        Return Outfit44
+    ElseIf index == 44
+        Return Outfit45
+    ElseIf index == 45
+        Return Outfit46
+    ElseIf index == 46
+        Return Outfit47
+    ElseIf index == 47
+        Return Outfit48
+    ElseIf index == 48
+        Return Outfit49
+    ElseIf index == 49
+        Return Outfit50
     EndIf
     Return None
 EndFunction

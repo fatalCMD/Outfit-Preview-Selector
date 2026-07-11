@@ -10,6 +10,13 @@ namespace
 	class FSMP25Bridge
 	{
 	public:
+		struct FrameEvent
+		{
+			bool gamePaused;
+		};
+
+		using WorldUpdate = void (*)(void*, const FrameEvent&);
+
 		static FSMP25Bridge& GetSingleton()
 		{
 			static FSMP25Bridge singleton;
@@ -19,24 +26,61 @@ namespace
 		void Tick()
 		{
 			Initialize();
-			if (!dispatch || !dispatcher) {
-				return;
-			}
-
-			const FrameEvent event{ false };
-			dispatch(dispatcher, event);
-			if (!tickConfirmed.exchange(true)) {
-				logger::info("FSMP 2.5 paused-preview physics tick confirmed.");
+			if (originalWorldUpdate) {
+				lastPreviewRequest.store(GetTickCount64());
+				if (!tickConfirmed.exchange(true)) {
+					logger::info("FSMP 2.5 preview physics activated through its normal frame pipeline.");
+				}
 			}
 		}
 
-	private:
-		struct FrameEvent
+		void Pause(std::uint32_t a_milliseconds)
 		{
-			bool gamePaused;
-		};
+			const auto duration = std::clamp<std::uint32_t>(a_milliseconds, 250, 3000);
+			pauseUntil.store(GetTickCount64() + duration);
+		}
 
-		using Dispatch = void (*)(void*, const FrameEvent&);
+	private:
+		static void WorldUpdateHook(void* a_world, const FrameEvent& a_event)
+		{
+			GetSingleton().RunWorldUpdate(a_world, a_event);
+		}
+
+		void RunWorldUpdate(void* a_world, const FrameEvent& a_event)
+		{
+			if (!originalWorldUpdate) {
+				return;
+			}
+
+			auto* ui = RE::UI::GetSingleton();
+			const auto lastRequest = lastPreviewRequest.load();
+			const auto now = GetTickCount64();
+			const bool previewActive = ui && MenuCamera::GetSingleton().IsActive() && now >= pauseUntil.load() &&
+				lastRequest != 0 && now - lastRequest < 100;
+			if (!previewActive) {
+				originalWorldUpdate(a_world, a_event);
+				return;
+			}
+
+			const auto savedPauses = ui->numPausesGame;
+			ui->numPausesGame = 0;
+			const FrameEvent previewEvent{ false };
+			originalWorldUpdate(a_world, previewEvent);
+			ui->numPausesGame = savedPauses;
+		}
+
+		static void WriteAbsoluteJump(std::uint8_t* a_buffer, std::uintptr_t a_destination)
+		{
+			a_buffer[0] = 0xFF;
+			a_buffer[1] = 0x25;
+			a_buffer[2] = 0x00;
+			a_buffer[3] = 0x00;
+			a_buffer[4] = 0x00;
+			a_buffer[5] = 0x00;
+			for (std::size_t i = 0; i < sizeof(a_destination); ++i) {
+				a_buffer[6 + i] = static_cast<std::uint8_t>((a_destination >> (i * 8)) & 0xFF);
+			}
+		}
 
 		void Initialize()
 		{
@@ -44,10 +88,11 @@ namespace
 				return;
 			}
 
-			constexpr std::uintptr_t DISPATCH_RVA = 0x000BBC60;
-			constexpr std::uintptr_t DISPATCHER_RVA = 0x00196F80;
-			constexpr std::uintptr_t DISPATCHER_VTABLE_RVA = 0x0015D088;
-			constexpr std::uint8_t SIGNATURE[] = { 0x48, 0x89, 0x5C, 0x24, 0x10, 0x48, 0x89, 0x6C, 0x24, 0x18 };
+			constexpr std::uintptr_t WORLD_UPDATE_RVA = 0x000B90B0;
+			constexpr std::uint8_t SIGNATURE[] = {
+				0x48, 0x8B, 0xC4, 0x53, 0x55, 0x56, 0x57, 0x41, 0x56,
+				0x41, 0x57, 0x48, 0x81, 0xEC, 0xE8, 0x00, 0x00, 0x00
+			};
 
 			auto* module = GetModuleHandleW(L"hdtSMP64.dll");
 			if (!module) {
@@ -62,33 +107,56 @@ namespace
 				return;
 			}
 			auto* nt = reinterpret_cast<const IMAGE_NT_HEADERS64*>(base + dos->e_lfanew);
-			if (nt->Signature != IMAGE_NT_SIGNATURE || nt->OptionalHeader.SizeOfImage <= DISPATCHER_RVA + sizeof(void*)) {
+			if (nt->Signature != IMAGE_NT_SIGNATURE ||
+				nt->OptionalHeader.SizeOfImage <= WORLD_UPDATE_RVA + sizeof(SIGNATURE)) {
 				logger::warn("FSMP build is not compatible with the guarded 2.5 preview bridge.");
 				return;
 			}
 
-			auto* code = reinterpret_cast<const std::uint8_t*>(base + DISPATCH_RVA);
+			auto* code = reinterpret_cast<const std::uint8_t*>(base + WORLD_UPDATE_RVA);
 			if (!std::equal(std::begin(SIGNATURE), std::end(SIGNATURE), code)) {
 				logger::warn("FSMP build signature differs from 2.5; paused-preview physics is disabled safely.");
 				return;
 			}
 
-			auto* candidateDispatcher = reinterpret_cast<void*>(base + DISPATCHER_RVA);
-			const auto candidateVtable = *reinterpret_cast<const std::uintptr_t*>(candidateDispatcher);
-			if (candidateVtable != base + DISPATCHER_VTABLE_RVA) {
-				logger::warn("FSMP 2.5 dispatcher validation failed; paused-preview physics is disabled safely.");
-				return;
-			}
+			constexpr std::size_t OVERWRITTEN_SIZE = 18;
+			constexpr std::size_t ABSOLUTE_JUMP_SIZE = 14;
+			fsmpTrampoline.create(64);
+			auto* gateway = static_cast<std::uint8_t*>(
+				fsmpTrampoline.allocate(OVERWRITTEN_SIZE + ABSOLUTE_JUMP_SIZE));
+			std::copy_n(code, OVERWRITTEN_SIZE, gateway);
+			WriteAbsoluteJump(gateway + OVERWRITTEN_SIZE, base + WORLD_UPDATE_RVA + OVERWRITTEN_SIZE);
+			originalWorldUpdate = reinterpret_cast<WorldUpdate>(gateway);
 
-			dispatcher = candidateDispatcher;
-			dispatch = reinterpret_cast<Dispatch>(base + DISPATCH_RVA);
-			logger::info("Compatible FSMP 2.5 detected; paused-preview SMP physics enabled at 30 Hz.");
+			std::uint8_t hookPatch[OVERWRITTEN_SIZE];
+			std::fill_n(hookPatch, OVERWRITTEN_SIZE, static_cast<std::uint8_t>(0x90));
+			WriteAbsoluteJump(hookPatch, reinterpret_cast<std::uintptr_t>(&WorldUpdateHook));
+			REL::safe_write(base + WORLD_UPDATE_RVA, hookPatch, OVERWRITTEN_SIZE);
+			logger::info("Compatible FSMP 2.5 detected; normal-pipeline preview physics hook installed.");
 		}
 
 		std::atomic_bool initialized = false;
 		std::atomic_bool tickConfirmed = false;
-		Dispatch dispatch = nullptr;
-		void* dispatcher = nullptr;
+		std::atomic<ULONGLONG> lastPreviewRequest = 0;
+		std::atomic<ULONGLONG> pauseUntil = 0;
+		SKSE::Trampoline fsmpTrampoline{ "OPS FSMP bridge" };
+		WorldUpdate originalWorldUpdate = nullptr;
+	};
+
+	class PausePreviewPhysics final : public RE::GFxFunctionHandler
+	{
+	public:
+		void Call(Params& a_params) override
+		{
+			std::uint32_t duration = 1200;
+			if (a_params.argCount >= 1 && a_params.args[0].IsNumber()) {
+				const auto requested = a_params.args[0].GetNumber();
+				if (std::isfinite(requested) && requested > 0.0) {
+					duration = static_cast<std::uint32_t>(requested);
+				}
+			}
+			FSMP25Bridge::GetSingleton().Pause(duration);
+		}
 	};
 
 	class TickPlayerAnimation final : public RE::GFxFunctionHandler
@@ -114,12 +182,7 @@ namespace
 			player->UpdateAnimation((std::min)(requestedDelta, 0.05f));
 			player->Update3DPosition(true);
 
-			const auto savedPauses = ui->numPausesGame;
-			ui->numPausesGame = 0;
-
 			FSMP25Bridge::GetSingleton().Tick();
-
-			ui->numPausesGame = savedPauses;
 
 			if (!animationTickConfirmed.exchange(true)) {
 				logger::info("Player-only animation and scene propagation confirmed while the game is paused.");
@@ -156,5 +219,11 @@ bool ScaleformBridge::Register(RE::GFxMovieView* a_view, RE::GFxValue* a_root)
 
 	RE::GFxValue reportFunction;
 	a_view->CreateFunction(&reportFunction, new ReportPreviewAnimationState());
-	return a_root->SetMember("ReportPreviewAnimationState", reportFunction);
+	if (!a_root->SetMember("ReportPreviewAnimationState", reportFunction)) {
+		return false;
+	}
+
+	RE::GFxValue pausePhysicsFunction;
+	a_view->CreateFunction(&pausePhysicsFunction, new PausePreviewPhysics());
+	return a_root->SetMember("PausePreviewPhysics", pausePhysicsFunction);
 }
