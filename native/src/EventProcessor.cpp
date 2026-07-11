@@ -6,6 +6,7 @@
 namespace
 {
 	constexpr std::string_view CUSTOM_MENU = "CustomMenu";
+	constexpr std::string_view CURSOR_MENU = "Cursor Menu";
 	constexpr std::string_view OPEN_EVENT = "OPS_NativePreviewOpen";
 	constexpr std::string_view CLOSE_EVENT = "OPS_NativePreviewClose";
 	constexpr std::string_view ROTATE_EVENT = "OPS_RotatePlayer";
@@ -21,6 +22,11 @@ namespace
 	constexpr DWORD MOUSE_MOVE_EVENT_INTERVAL_MS = 16;
 
 	std::atomic_bool blurClearQueued = false;
+
+	bool IsProtectedMenu(std::string_view a_menuName)
+	{
+		return a_menuName == CUSTOM_MENU || a_menuName == CURSOR_MENU;
+	}
 
 	bool IsGamepadCancel(const RE::ButtonEvent& a_button)
 	{
@@ -465,7 +471,7 @@ void EventProcessor::HideOtherMenus()
 		return;
 	}
 	for (auto& [name, entry] : ui->menuMap) {
-		if (std::string_view(name.c_str()) == CUSTOM_MENU || !entry.menu || !entry.menu->uiMovie) {
+		if (IsProtectedMenu(name.c_str()) || !entry.menu || !entry.menu->uiMovie) {
 			continue;
 		}
 		if (entry.menu->uiMovie->GetVisible()) {
@@ -478,7 +484,7 @@ void EventProcessor::HideOtherMenus()
 
 void EventProcessor::HideMenu(std::string_view a_menuName)
 {
-	if (!Settings::hideOtherUI || a_menuName == CUSTOM_MENU) {
+	if (!Settings::hideOtherUI || IsProtectedMenu(a_menuName)) {
 		return;
 	}
 	const auto alreadyHidden = std::find_if(hiddenMenus.begin(), hiddenMenus.end(), [&](const auto& name) {

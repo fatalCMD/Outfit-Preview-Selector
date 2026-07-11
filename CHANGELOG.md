@@ -10,6 +10,7 @@
 - Added animated gold highlighting for menu controls.
 - Added optional hiding of other UI while OPS is open.
 - Improved outfit-switching safety and fixed cursor jitter.
+- Fixed the SkyUI cursor being hidden with other HUD elements.
 
 ## 1.1.0 - 2026-07-11
 
