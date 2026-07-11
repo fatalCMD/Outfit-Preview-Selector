@@ -585,7 +585,7 @@ class OutfitPreviewMenu {
 
         if (viewMode == "detail" && (code == Key.BACKSPACE || code == 14)) {
             noteNavInput(false);
-            showList();
+            requestSlotAction("back", -1);
             return true;
         }
         return false;
@@ -862,7 +862,7 @@ class OutfitPreviewMenu {
 
     private function moveDetailHorizontal(delta:Number):Void {
         if (detailFocus == 1) {
-            cycleSelectedIcon(delta);
+            requestSlotAction(delta < 0 ? "iconPrev" : "iconNext", -1);
             return;
         }
         if (detailFocus < 2 || detailFocus > 5) {
@@ -916,17 +916,18 @@ class OutfitPreviewMenu {
                 if (listColumn == 0) requestCardViewToggle();
                 else requestPageChange(listColumn == 1 ? -1 : 1);
             } else if (listRow == slots.length + 1) {
-                closeMenu();
+                requestSlotAction("close", -1);
             }
             return;
         }
         if (!cardView && listColumn == 1) {
             var slot:Object = getActiveSlot();
             if (slot != undefined) {
-                openDetail(Number(slot.index));
+                requestSlotAction("editSlot", Number(slot.index));
             }
         } else {
-            applySelected();
+            var applySlot:Object = getActiveSlot();
+            if (applySlot != undefined) requestSlotAction("applySlot", Number(applySlot.index));
         }
     }
 
@@ -940,29 +941,25 @@ class OutfitPreviewMenu {
         var slot:Object = getActiveSlot();
         if (slot != undefined) {
             listColumn = 1;
-            openDetail(Number(slot.index));
+            requestSlotAction("editSlot", Number(slot.index));
         }
     }
 
     private function acceptDetailSelection():Void {
         if (detailFocus == 0) {
-            if (editingName) {
-                commitRename();
-            } else {
-                startRenameTyping();
-            }
+            requestSlotAction("rename", -1);
         } else if (detailFocus == 1) {
-            cycleSelectedIcon(1);
+            requestSlotAction("iconNext", -1);
         } else if (detailFocus == 2) {
-            showList();
+            requestSlotAction("back", -1);
         } else if (detailFocus == 3) {
-            applySelected();
+            requestSlotAction("apply", -1);
         } else if (detailFocus == 4) {
-            saveSelected();
+            requestSlotAction("save", -1);
         } else if (detailFocus == 5) {
-            clearSelected();
+            requestSlotAction("clear", -1);
         } else if (detailFocus == 6) {
-            closeMenu();
+            requestSlotAction("close", -1);
         }
     }
 
@@ -1520,7 +1517,7 @@ class OutfitPreviewMenu {
             }
             self.noteMouseInput(false);
             self.focusAction(action, idx);
-            self.runAction(action, idx);
+            self.requestSlotAction(action, idx);
         };
     }
 
@@ -1670,6 +1667,8 @@ class OutfitPreviewMenu {
                 self.listRow = requestedIndex;
                 self.selectIndex(requestedIndex, false);
                 self.openDetail(requestedIndex);
+            } else {
+                self.runAction(requestedAction, requestedIndex);
             }
         };
     }
@@ -1790,7 +1789,7 @@ class OutfitPreviewMenu {
                     requestSlotAction("editSlot", Number(zone.idx));
                 } else {
                     focusAction(String(zone.action), Number(zone.idx));
-                    runAction(String(zone.action), Number(zone.idx));
+                    requestSlotAction(String(zone.action), Number(zone.idx));
                 }
                 return true;
             }
