@@ -44,6 +44,8 @@ class OutfitPreviewMenu {
     private var pageChangePending:Boolean;
     private var lastPageChangeTime:Number;
     private var pendingPageDirection:Number;
+    private var viewChangePending:Boolean;
+    private var lastViewChangeTime:Number;
     private var slotActionPending:Boolean;
     private var pendingSlotAction:String;
     private var pendingSlotIndex:Number;
@@ -99,6 +101,8 @@ class OutfitPreviewMenu {
         pageChangePending = false;
         lastPageChangeTime = -999;
         pendingPageDirection = 0;
+        viewChangePending = false;
+        lastViewChangeTime = -999;
         slotActionPending = false;
         pendingSlotAction = "";
         pendingSlotIndex = -1;
@@ -909,7 +913,7 @@ class OutfitPreviewMenu {
         }
         if (listRow >= slots.length) {
             if (listRow == slots.length) {
-                if (listColumn == 0) toggleCardView();
+                if (listColumn == 0) requestCardViewToggle();
                 else requestPageChange(listColumn == 1 ? -1 : 1);
             } else if (listRow == slots.length + 1) {
                 closeMenu();
@@ -1570,7 +1574,7 @@ class OutfitPreviewMenu {
         } else if (action == "detail") {
             openDetail(idx);
         } else if (action == "toggleCards") {
-            toggleCardView();
+            requestCardViewToggle();
         } else if (action == "iconPrev") {
             cycleSelectedIcon(-1);
         } else if (action == "iconNext") {
@@ -1580,6 +1584,21 @@ class OutfitPreviewMenu {
         } else if (action == "nextPage") {
             requestPageChange(1);
         }
+    }
+
+    private function requestCardViewToggle():Void {
+        if (viewChangePending || pageChangePending || slotActionPending || getTimer() - lastViewChangeTime < 350) return;
+
+        viewChangePending = true;
+        var self:OutfitPreviewMenu = this;
+        var task:MovieClip = root.createEmptyMovieClip("opsDeferredViewChange", 9993);
+        task.onEnterFrame = function():Void {
+            delete this.onEnterFrame;
+            self.viewChangePending = false;
+            self.lastViewChangeTime = getTimer();
+            this.removeMovieClip();
+            self.toggleCardView();
+        };
     }
 
     private function toggleCardView():Void {
@@ -1593,7 +1612,7 @@ class OutfitPreviewMenu {
     }
 
     private function requestPageChange(delta:Number):Void {
-        if (pageChangePending || getTimer() - lastPageChangeTime < 350) return;
+        if (pageChangePending || viewChangePending || slotActionPending || getTimer() - lastPageChangeTime < 350) return;
         var target:Number = currentPage + delta;
         if (target < 0 || target >= getPageCount()) return;
 
@@ -1625,7 +1644,7 @@ class OutfitPreviewMenu {
 
     private function requestSlotAction(action:String, idx:Number):Void {
         if (action == "applySlot" && equippingIndex >= 0) return;
-        if (slotActionPending || getTimer() - lastSlotActionTime < 350) return;
+        if (slotActionPending || viewChangePending || pageChangePending || getTimer() - lastSlotActionTime < 350) return;
         slotActionPending = true;
         pendingSlotAction = action;
         pendingSlotIndex = idx;

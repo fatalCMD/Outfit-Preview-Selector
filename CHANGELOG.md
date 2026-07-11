@@ -13,6 +13,7 @@
 - Fixed the SkyUI cursor being hidden with other HUD elements.
 - Fixed a crash caused by the experimental depth-of-field object.
 - Fixed empty cards sharing the equipping animation and kept the outfit badge bound to worn gear.
+- Fixed a crash when switching between List and Card views.
 
 ## 1.1.0 - 2026-07-11
 
