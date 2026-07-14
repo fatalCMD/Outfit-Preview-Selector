@@ -204,6 +204,22 @@ namespace
 		}
 	};
 
+	class ResetPreviewAnimation final : public RE::GFxFunctionHandler
+	{
+	public:
+		void Call(Params&) override
+		{
+			auto* player = RE::PlayerCharacter::GetSingleton();
+			if (!player || !player->Get3D() || !MenuCamera::GetSingleton().IsActive()) {
+				return;
+			}
+
+			player->NotifyAnimationGraph(RE::BSFixedString("IdleForceDefaultState"));
+			player->UpdateAnimation(0.0f);
+			player->Update3DPosition(true);
+		}
+	};
+
 	class SetCameraOffsets final : public RE::GFxFunctionHandler
 	{
 	public:
@@ -213,6 +229,32 @@ namespace
 			const auto side = static_cast<float>(a_params.args[0].GetNumber());
 			const auto height = static_cast<float>(a_params.args[1].GetNumber());
 			if (std::isfinite(side) && std::isfinite(height)) MenuCamera::GetSingleton().SetUserOffsets(side, height);
+		}
+	};
+
+	class SetCameraMode final : public RE::GFxFunctionHandler
+	{
+	public:
+		void Call(Params& a_params) override
+		{
+			if (a_params.argCount < 1 || !a_params.args[0].IsNumber()) return;
+			const auto requested = a_params.args[0].GetNumber();
+			if (!std::isfinite(requested)) return;
+			MenuCamera::GetSingleton().SetControlMode(static_cast<std::uint32_t>(std::clamp(requested, 0.0, 2.0)));
+		}
+	};
+
+	class SetPreviewLight final : public RE::GFxFunctionHandler
+	{
+	public:
+		void Call(Params& a_params) override
+		{
+			if (a_params.argCount < 1) return;
+			if (a_params.args[0].IsBool()) {
+				MenuCamera::GetSingleton().SetPreviewLight(a_params.args[0].GetBool());
+			} else if (a_params.args[0].IsNumber()) {
+				MenuCamera::GetSingleton().SetPreviewLight(a_params.args[0].GetNumber() != 0.0);
+			}
 		}
 	};
 }
@@ -235,11 +277,25 @@ bool ScaleformBridge::Register(RE::GFxMovieView* a_view, RE::GFxValue* a_root)
 		return false;
 	}
 
+	RE::GFxValue resetAnimationFunction;
+	a_view->CreateFunction(&resetAnimationFunction, new ResetPreviewAnimation());
+	if (!a_root->SetMember("ResetPreviewAnimation", resetAnimationFunction)) {
+		return false;
+	}
+
 	RE::GFxValue pausePhysicsFunction;
 	a_view->CreateFunction(&pausePhysicsFunction, new PausePreviewPhysics());
 	if (!a_root->SetMember("PausePreviewPhysics", pausePhysicsFunction)) return false;
 
 	RE::GFxValue cameraOffsetsFunction;
 	a_view->CreateFunction(&cameraOffsetsFunction, new SetCameraOffsets());
-	return a_root->SetMember("SetCameraOffsets", cameraOffsetsFunction);
+	if (!a_root->SetMember("SetCameraOffsets", cameraOffsetsFunction)) return false;
+
+	RE::GFxValue cameraModeFunction;
+	a_view->CreateFunction(&cameraModeFunction, new SetCameraMode());
+	if (!a_root->SetMember("SetCameraMode", cameraModeFunction)) return false;
+
+	RE::GFxValue previewLightFunction;
+	a_view->CreateFunction(&previewLightFunction, new SetPreviewLight());
+	return a_root->SetMember("SetPreviewLight", previewLightFunction);
 }

@@ -88,6 +88,12 @@ namespace
 				Settings::lightGreen = ParseFloat(a_value, Settings::lightGreen);
 			} else if (a_key == "FBLUE") {
 				Settings::lightBlue = ParseFloat(a_value, Settings::lightBlue);
+			} else if (a_key == "FOFFSETX") {
+				Settings::lightOffsetX = ParseFloat(a_value, Settings::lightOffsetX);
+			} else if (a_key == "FOFFSETY") {
+				Settings::lightOffsetY = ParseFloat(a_value, Settings::lightOffsetY);
+			} else if (a_key == "FOFFSETZ") {
+				Settings::lightOffsetZ = ParseFloat(a_value, Settings::lightOffsetZ);
 			}
 			return;
 		}
@@ -141,12 +147,15 @@ namespace Settings
 		offsetZ = -24.0f;
 		distance = 182.0f;
 		fov = 60.0f;
-		lightStrength = 1.25f;
-		lightAmbient = 0.08f;
+		lightStrength = 0.65f;
+		lightAmbient = 0.04f;
 		lightRadius = 420.0f;
 		lightRed = 1.0f;
 		lightGreen = 0.88f;
 		lightBlue = 0.72f;
+		lightOffsetX = -70.0f;
+		lightOffsetY = -25.0f;
+		lightOffsetZ = 110.0f;
 	}
 
 	void Load()
@@ -204,5 +213,22 @@ namespace Settings
 			offsetZ,
 			distance,
 			fov);
+	}
+
+	bool SaveCameraValues(float a_distance, float a_height)
+	{
+		distance = std::clamp(a_distance, 80.0f, 360.0f);
+		offsetZ = std::clamp(a_height, -120.0f, 120.0f);
+		const auto path = GetINIPath().wstring();
+		const auto distanceValue = std::to_wstring(distance);
+		const auto heightValue = std::to_wstring(offsetZ);
+		const bool heightSaved = WritePrivateProfileStringW(L"Camera", L"fOffsetZ", heightValue.c_str(), path.c_str()) != FALSE;
+		const bool distanceSaved = WritePrivateProfileStringW(L"Camera", L"fDistance", distanceValue.c_str(), path.c_str()) != FALSE;
+		if (!heightSaved || !distanceSaved) {
+			logger::warn("[Settings] Could not save preview camera values to {}.", GetINIPath().string());
+			return false;
+		}
+		logger::info("[Settings] Saved preview camera height={} distance={}.", offsetZ, distance);
+		return true;
 	}
 }

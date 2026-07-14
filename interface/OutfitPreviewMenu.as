@@ -2,6 +2,7 @@ class OutfitPreviewMenu {
     private var root:MovieClip;
     private var panel:MovieClip;
     private var outfitBadge:MovieClip;
+    private var outfitBadgeSignature:String;
     private var slots:Array;
     private var selected:Number;
     private var nextDepth:Number;
@@ -58,6 +59,24 @@ class OutfitPreviewMenu {
     private var redrawPending:Boolean;
     private var rendering:Boolean;
     private var introPending:Boolean;
+    private var animationSuppressedUntil:Number;
+    private var animationResetPending:Boolean;
+    private var manageMode:Boolean;
+    private var manageSource:Number;
+    private var manageAction:String;
+    private var manageDeleteArmed:Boolean;
+    private var manageHint:String;
+    private var managePointerDown:Boolean;
+    private var managePointerSlot:Number;
+    private var manageStartX:Number;
+    private var manageStartY:Number;
+    private var manageDragging:Boolean;
+    private var manageDragGhost:MovieClip;
+    private var manageHoverDirection:Number;
+    private var manageHoverStarted:Number;
+    private var manageTransitionPending:Boolean;
+    private var cameraMode:Number;
+    private var previewLightOn:Boolean;
 
     public function OutfitPreviewMenu(rootClip:MovieClip) {
         root = rootClip;
@@ -67,6 +86,7 @@ class OutfitPreviewMenu {
         root.tabChildren = false;
         root._focusrect = false;
         slots = new Array();
+        outfitBadgeSignature = "";
         clickZones = new Array();
         selected = 0;
         nextDepth = 10;
@@ -118,10 +138,28 @@ class OutfitPreviewMenu {
         redrawPending = false;
         rendering = false;
         introPending = false;
+        animationSuppressedUntil = 0;
+        animationResetPending = false;
+        manageMode = false;
+        manageSource = -1;
+        manageAction = "";
+        manageDeleteArmed = false;
+        manageHint = "SELECT A PRESET";
+        managePointerDown = false;
+        managePointerSlot = -1;
+        manageStartX = 0;
+        manageStartY = 0;
+        manageDragging = false;
+        manageHoverDirection = 0;
+        manageHoverStarted = 0;
+        manageTransitionPending = false;
+        cameraMode = 0;
+        previewLightOn = false;
 
         installKeys();
         installMouse();
         renderPanel();
+        applyCameraMode();
         disableFocusTarget(root);
         if (_root != undefined) {
             disableFocusTarget(_root);
@@ -145,6 +183,7 @@ class OutfitPreviewMenu {
             self.pollEscape();
             self.tickPlayerIdleAnimation();
             self.tickEquipStatus();
+            self.tickManagePageHover();
             self.updateNativeCursor();
         };
 
@@ -156,6 +195,7 @@ class OutfitPreviewMenu {
             if (self.nativeCursor != undefined) {
                 self.nativeCursor.removeMovieClip();
             }
+            self.removeManageDragGhost();
             self.sendEvent("OPS_NativePreviewClose", "", 0);
             self.sendEvent("OPS_MenuClosed", "", 0);
         };
@@ -227,6 +267,7 @@ class OutfitPreviewMenu {
 
         equippingIndex = -1;
         equipStartedTime = 0;
+        suppressPreviewAnimation(450);
         if (succeeded) {
             lastApplied = slotIndex;
             animateCurrent = true;
@@ -263,6 +304,26 @@ class OutfitPreviewMenu {
             var api:Object = _global.skse.plugins.OutfitPreviewSelectorCamera;
             if (api != undefined && api.SetCameraOffsets != undefined) api.SetCameraOffsets(side, height);
         }
+    }
+
+    private function applyCameraMode():Void {
+        if (_global.skse != undefined && _global.skse.plugins != undefined) {
+            var api:Object = _global.skse.plugins.OutfitPreviewSelectorCamera;
+            if (api != undefined && api.SetCameraMode != undefined) api.SetCameraMode(cameraMode);
+        }
+    }
+
+    private function chooseCameraMode(mode:Number):Void {
+        if (isNaN(mode)) mode = 0;
+        cameraMode = Math.max(0, Math.min(2, Math.floor(mode)));
+        applyCameraMode();
+        draw();
+    }
+
+    private function togglePreviewLight():Void {
+        previewLightOn = !previewLightOn;
+        sendEvent("OPS_TogglePreviewLight", "", previewLightOn ? 1 : 0);
+        draw();
     }
 
     public function nativeMouseClick(raw:String):Void {
@@ -494,11 +555,6 @@ class OutfitPreviewMenu {
             if (runMouseHitAction()) {
                 return true;
             }
-            if (_root._xmouse > 500) {
-                dragging = true;
-                lastMouseX = _root._xmouse;
-                return true;
-            }
             return false;
         }
 
@@ -539,12 +595,14 @@ class OutfitPreviewMenu {
                 return;
             }
             self.noteMouseInput(false);
-            if (_root._xmouse > 500) {
-                self.dragging = true;
-                self.lastMouseX = _root._xmouse;
-            }
+            self.dragging = false;
         };
         mouseListener.onMouseUp = function():Void {
+            if (self.managePointerDown) {
+                self.finishManagePointer(_root._xmouse, _root._ymouse);
+                self.dragging = false;
+                return;
+            }
             self.dragging = false;
         };
         mouseListener.onMouseMove = function():Void {
@@ -556,12 +614,10 @@ class OutfitPreviewMenu {
                 self.lastRealMouseY = _root._ymouse;
                 self.noteMouseInput(true);
             }
-            if (self.dragging) {
-                var dx:Number = _root._xmouse - self.lastMouseX;
-                if (Math.abs(dx) >= 5) {
-                    self.sendEvent("OPS_RotatePlayer", "", dx);
-                    self.lastMouseX = _root._xmouse;
-                }
+            if (self.managePointerDown) {
+                self.updateManagePointer(_root._xmouse, _root._ymouse);
+                self.dragging = false;
+                return;
             }
         };
         Mouse.addListener(mouseListener);
@@ -608,6 +664,16 @@ class OutfitPreviewMenu {
         }
 
         var now:Number = getTimer();
+        if (now < animationSuppressedUntil) {
+            lastIdleAnimationTime = 0;
+            return;
+        }
+        if (animationResetPending) {
+            resetPreviewAnimation();
+            animationResetPending = false;
+            lastIdleAnimationTime = 0;
+            return;
+        }
         if (lastIdleAnimationTime <= 0) {
             lastIdleAnimationTime = now;
             return;
@@ -774,13 +840,34 @@ class OutfitPreviewMenu {
         if (slots.length == 0) {
             return;
         }
+        if (listRow == -3) {
+            listColumn += delta;
+            if (listColumn < 0) listColumn = 0;
+            if (listColumn > 3) listColumn = 3;
+            navCursorVisible = true;
+            draw();
+            return;
+        }
         if (cardView) {
             moveCardVertical(delta);
             return;
         }
         var first:Number = currentPage * pageSize;
         var last:Number = Math.min(first + pageSize, slots.length) - 1;
-        if (listRow < first || listRow > slots.length + 1) {
+        if (listRow == -2) {
+            if (delta > 0) {
+                listRow = -1;
+                listColumn = 0;
+            }
+        } else if (listRow == -1) {
+            if (delta > 0) {
+                listRow = first;
+                listColumn = 0;
+            } else if (delta < 0 && manageMode) {
+                listRow = -2;
+                listColumn = 0;
+            }
+        } else if (listRow < first || listRow > slots.length + 1) {
             listRow = first;
         } else if (delta > 0) {
             if (listRow < last) listRow++;
@@ -796,8 +883,12 @@ class OutfitPreviewMenu {
             }
             else if (listRow == slots.length) listRow = last;
             else if (listRow > first) listRow--;
+            else if (listRow == first) {
+                listRow = -1;
+                listColumn = 0;
+            }
         }
-        if (listRow < slots.length) {
+        if (listRow >= 0 && listRow < slots.length) {
             selected = listRow;
             editIndex = selected;
         }
@@ -807,12 +898,28 @@ class OutfitPreviewMenu {
     private function moveCardVertical(delta:Number):Void {
         var first:Number = currentPage * pageSize;
         var last:Number = Math.min(first + pageSize, slots.length) - 1;
-        if (listRow < slots.length) {
+        if (listRow == -2) {
+            if (delta > 0) {
+                listRow = -1;
+                listColumn = 0;
+            }
+        } else if (listRow == -1) {
+            if (delta > 0) {
+                selected = first;
+                listRow = selected;
+                listColumn = 0;
+            } else if (delta < 0 && manageMode) {
+                listRow = -2;
+                listColumn = 0;
+            }
+        } else if (listRow >= 0 && listRow < slots.length) {
             var target:Number = selected + delta * 2;
             if (target >= first && target <= last) {
                 selected = target; listRow = target;
             } else if (delta > 0) {
                 listRow = slots.length; listColumn = 0;
+            } else if (delta < 0) {
+                listRow = -1; listColumn = 0;
             }
         } else if (listRow == slots.length) {
             if (delta > 0) listRow = slots.length + 1;
@@ -892,6 +999,40 @@ class OutfitPreviewMenu {
         if (listRow > slots.length) {
             return;
         }
+        if (listRow == -3) {
+            if (delta < 0) {
+                listRow = -2;
+                listColumn = 0;
+            }
+            navCursorVisible = true;
+            draw();
+            return;
+        }
+        if (listRow == -2) {
+            if (delta > 0 && manageMode) {
+                listRow = -3;
+                listColumn = cameraMode;
+            }
+            navCursorVisible = true;
+            draw();
+            return;
+        }
+        if (listRow == -1) {
+            if (manageMode && listColumn == 2 && delta > 0) {
+                listRow = -3;
+                listColumn = cameraMode;
+                navCursorVisible = true;
+                draw();
+                return;
+            }
+            listColumn += delta;
+            var manageColumns:Number = manageMode ? 2 : 0;
+            if (listColumn < 0) listColumn = 0;
+            if (listColumn > manageColumns) listColumn = manageColumns;
+            navCursorVisible = true;
+            draw();
+            return;
+        }
         if (cardView && listRow < slots.length) {
             moveCardHorizontal(delta);
             return;
@@ -913,6 +1054,19 @@ class OutfitPreviewMenu {
             acceptDetailSelection();
             return;
         }
+        if (listRow == -3) {
+            if (listColumn == 3) togglePreviewLight();
+            else chooseCameraMode(listColumn);
+            return;
+        }
+        if (listRow == -2) {
+            toggleManageMode();
+            return;
+        }
+        if (listRow == -1) {
+            runManageTopAction(listColumn);
+            return;
+        }
         if (listRow >= slots.length) {
             if (listRow == slots.length) {
                 if (listColumn == 0) requestCardViewToggle();
@@ -922,7 +1076,9 @@ class OutfitPreviewMenu {
             }
             return;
         }
-        if (!cardView && listColumn == 1) {
+        if (manageMode) {
+            handleManageSlot(Number(slots[selected].index));
+        } else if (!cardView && listColumn == 1) {
             var slot:Object = getActiveSlot();
             if (slot != undefined) {
                 requestSlotAction("editSlot", Number(slot.index));
@@ -934,10 +1090,10 @@ class OutfitPreviewMenu {
     }
 
     private function openFocusedDetail():Void {
-        if (viewMode == "detail") {
+        if (viewMode == "detail" || manageMode) {
             return;
         }
-        if (listRow >= slots.length) {
+        if (listRow < 0 || listRow >= slots.length) {
             return;
         }
         var slot:Object = getActiveSlot();
@@ -1028,6 +1184,7 @@ class OutfitPreviewMenu {
             return;
         }
         pausePreviewPhysics(1200);
+        suppressPreviewAnimation(1200);
         equippingIndex = Number(slot.index);
         equipStartedTime = getTimer();
         draw();
@@ -1054,6 +1211,20 @@ class OutfitPreviewMenu {
             if (api != undefined && api.PausePreviewPhysics != undefined) {
                 api.PausePreviewPhysics(duration);
             }
+        }
+    }
+
+    private function suppressPreviewAnimation(duration:Number):Void {
+        var until:Number = getTimer() + Math.max(250, duration);
+        if (until > animationSuppressedUntil) animationSuppressedUntil = until;
+        animationResetPending = true;
+        lastIdleAnimationTime = 0;
+    }
+
+    private function resetPreviewAnimation():Void {
+        if (_global.skse != undefined && _global.skse.plugins != undefined) {
+            var api:Object = _global.skse.plugins.OutfitPreviewSelectorCamera;
+            if (api != undefined && api.ResetPreviewAnimation != undefined) api.ResetPreviewAnimation();
         }
     }
 
@@ -1084,6 +1255,8 @@ class OutfitPreviewMenu {
         editIndex = selected;
         viewMode = "detail";
         detailFocus = 0;
+        cameraMode = 0;
+        applyCameraMode();
         draw();
     }
 
@@ -1091,6 +1264,8 @@ class OutfitPreviewMenu {
         viewMode = "list";
         renameField = undefined;
         editingName = false;
+        cameraMode = 0;
+        applyCameraMode();
         draw();
     }
 
@@ -1148,6 +1323,7 @@ class OutfitPreviewMenu {
             drawDetail();
         } else {
             drawList();
+            if (manageMode) drawCameraTabs();
         }
         drawNavCursor();
         drawOutfitBadge();
@@ -1169,13 +1345,25 @@ class OutfitPreviewMenu {
         } else if (introPending) {
             introPending = false;
             animatePanelIntro();
+        } else if (manageTransitionPending) {
+            manageTransitionPending = false;
+            animateManageTransition();
         }
     }
 
     private function drawOutfitBadge():Void {
-        if (outfitBadge != undefined) outfitBadge.removeMovieClip();
         var slot:Object = getEquippedSlot();
-        if (slot == undefined) return;
+        if (slot == undefined) {
+            if (outfitBadge != undefined) outfitBadge.removeMovieClip();
+            outfitBadge = undefined;
+            outfitBadgeSignature = "";
+            return;
+        }
+
+        var signature:String = Number(slot.index) + "|" + safe(slot.name) + "|" + safe(slot.icon) + "|" + safe(slot.ready) + "|" + safe(slot.count) + "|" + safe(slot.armor);
+        if (outfitBadge != undefined && outfitBadgeSignature == signature) return;
+        if (outfitBadge != undefined) outfitBadge.removeMovieClip();
+        outfitBadgeSignature = signature;
 
         outfitBadge = root.createEmptyMovieClip("opsOutfitBadge", 2);
         outfitBadge._x = 900;
@@ -1201,14 +1389,7 @@ class OutfitPreviewMenu {
             if (this._x > 252) this._x = 70;
         };
 
-        outfitBadge._alpha = 0;
-        outfitBadge.onEnterFrame = function():Void {
-            this._alpha += 16;
-            if (this._alpha >= 100) {
-                this._alpha = 100;
-                delete this.onEnterFrame;
-            }
-        };
+        outfitBadge._alpha = 100;
     }
 
     private function drawList():Void {
@@ -1217,27 +1398,29 @@ class OutfitPreviewMenu {
         rect(panel, 58, 72, 398, 626, 0x000000, 62, 0x6E685A, 58, 1);
         drawOrnateFrame(panel, 62, 76, 390, 618);
         rect(panel, 76, 118, 350, 1, 0x827868, 52, -1, 0, 0);
-        addText(panel, "title", 78, 86, 348, 26, "G E A R       P R E S E T S", 18, 0xEEE8DC, true, "center");
+        addText(panel, "title", 78, 86, 348, 26, "G E A R       P R E S E T S", 16, 0xEEE8DC, true, "center");
+        drawManageButton(399, 84, manageMode ? listRow == -2 : listRow == -1);
+        if (manageMode) drawManageToolbar();
 
-        var y:Number = 138;
+        var y:Number = manageMode ? 158 : 138;
         var first:Number = currentPage * pageSize;
         var last:Number = Math.min(first + pageSize, slots.length);
         var i:Number = first;
         while (i < last) {
             if (cardView) {
                 var local:Number = i - first;
-                drawCard(slots[i], 78 + (local % 2) * 176, y + Math.floor(local / 2) * 80, 170, 72, i == selected && listRow < slots.length, Number(slots[i].index) == lastApplied, isEquippingSlot(slots[i]));
+                drawCard(slots[i], 78 + (local % 2) * 176, y + Math.floor(local / 2) * (manageMode ? 69 : 80), 170, manageMode ? 64 : 72, i == selected && listRow >= 0 && listRow < slots.length, Number(slots[i].index) == lastApplied, isEquippingSlot(slots[i]));
             } else {
-                drawSlot(slots[i], 78, y + (i - first) * 40, 348, 34, i == selected && listRow < slots.length, Number(slots[i].index) == lastApplied, isEquippingSlot(slots[i]));
+                drawSlot(slots[i], 78, y + (i - first) * (manageMode ? 35 : 40), 348, manageMode ? 31 : 34, i == selected && listRow >= 0 && listRow < slots.length, Number(slots[i].index) == lastApplied, isEquippingSlot(slots[i]));
             }
             i++;
         }
         animateCurrent = false;
 
-        if (cardView && navCursorVisible) addText(panel, "cardPrompt", 78, 530, 348, 12, "A / CROSS  EQUIP       Y / TRIANGLE  EDIT", 9, 0xB8A074, false, "center");
+        if (cardView && navCursorVisible) addText(panel, "cardPrompt", 78, 530, 348, 12, manageMode ? "A / CROSS  SELECT       DRAG  REORDER" : "A / CROSS  EQUIP       Y / TRIANGLE  EDIT", 9, 0xB8A074, false, "center");
 
         rect(panel, 76, 544, 350, 1, 0x827868, 42, -1, 0, 0);
-        drawButton("viewToggle", 78, 558, 116, 34, cardView ? "LIST VIEW" : "CARD VIEW", "toggleCards", -1, listRow == slots.length && listColumn == 0);
+        drawViewToggle(78, 558, listRow == slots.length && listColumn == 0);
         addText(panel, "page", 212, 562, 76, 22, (currentPage + 1) + " / " + getPageCount(), 12, 0xC8BA98, false, "center");
         drawPageArrow("pagePrev", 306, 558, 56, 34, -1, currentPage > 0, listRow == slots.length && listColumn == 1);
         drawPageArrow("pageNext", 370, 558, 56, 34, 1, currentPage < getPageCount() - 1, listRow == slots.length && listColumn == 2);
@@ -1249,18 +1432,179 @@ class OutfitPreviewMenu {
         }
     }
 
+    private function drawManageToolbar():Void {
+        drawButton("manageCopy", 78, 121, 104, 24, "COPY", "manageCopy", -1, listRow == -1 && listColumn == 0);
+        drawButton("manageSwap", 200, 121, 104, 24, "SWAP", "manageSwap", -1, listRow == -1 && listColumn == 1);
+        drawButton("manageDelete", 322, 121, 104, 24, manageDeleteArmed ? "CONFIRM" : "DELETE", "manageDelete", -1, listRow == -1 && listColumn == 2);
+        var hint:String = manageHint;
+        if (manageSource >= 0) hint = twoDigits(manageSource + 1) + "  " + hint;
+        addText(panel, "manageHint", 78, 146, 348, 11, hint, 8, manageAction == "" ? 0x9E927A : 0xD3B56D, true, "center");
+    }
+
+    private function createIconButton(name:String, x:Number, y:Number, w:Number, h:Number, action:String, focused:Boolean, selectedState:Boolean):MovieClip {
+        var button:MovieClip = panel.createEmptyMovieClip(name + nextDepth, nextDepth++);
+        button._x = x;
+        button._y = y;
+        disableFocusTarget(button);
+        var fill:Number = selectedState ? 0x292313 : 0x101112;
+        var stroke:Number = selectedState ? 0xD4B45C : 0x4A5056;
+        rect(button, 0, 0, w, h, fill, selectedState ? 94 : 78, stroke, selectedState ? 96 : 68, selectedState ? 2 : 1);
+        if (focused && navCursorVisible) drawAnimatedFocus(button, w, h);
+        addClickZone(x, y, w, h, action, -1);
+        var self:OutfitPreviewMenu = this;
+        button.useHandCursor = true;
+        button.onRollOver = function():Void { Mouse.show(); };
+        button.onRelease = function():Void {
+            if (self.skipClipRelease()) return;
+            self.noteMouseInput(false);
+            self.focusAction(action, -1);
+            self.requestSlotAction(action, -1);
+        };
+        return button;
+    }
+
+    private function drawManageButton(x:Number, y:Number, focused:Boolean):Void {
+        var button:MovieClip = createIconButton("manageSettings", x + 3, y + 2, 24, 24, "toggleManage", focused, manageMode);
+        drawSettingsRune(button, 12, 12, manageMode ? 0xF2D77A : 0xD8CFBF);
+    }
+
+    private function drawViewToggle(x:Number, y:Number, focused:Boolean):Void {
+        var button:MovieClip = createIconButton("viewIcon", x, y, 40, 34, "toggleCards", focused, false);
+        var color:Number = focused ? 0xF2D77A : 0xD8CFBF;
+        if (cardView) drawListIcon(button, 20, 17, color);
+        else drawGridIcon(button, 20, 17, color);
+    }
+
+    private function drawCameraTabs():Void {
+        var rotate:MovieClip = createIconButton("cameraRotate", 456, 92, 30, 26, "cameraRotate", listRow == -3 && listColumn == 0, cameraMode == 0);
+        var zoom:MovieClip = createIconButton("cameraZoom", 456, 122, 30, 26, "cameraZoom", listRow == -3 && listColumn == 1, cameraMode == 1);
+        var vertical:MovieClip = createIconButton("cameraVertical", 456, 152, 30, 26, "cameraVertical", listRow == -3 && listColumn == 2, cameraMode == 2);
+        var light:MovieClip = createIconButton("cameraLight", 456, 182, 30, 26, "cameraLight", listRow == -3 && listColumn == 3, previewLightOn);
+        drawRotateIcon(rotate, 15, 13, cameraMode == 0 ? 0xF2D77A : 0xD8CFBF);
+        drawZoomIcon(zoom, 15, 13, cameraMode == 1 ? 0xF2D77A : 0xD8CFBF);
+        drawAxisIcon(vertical, 15, 13, cameraMode == 2 ? 0xF2D77A : 0xD8CFBF);
+        drawLightIcon(light, 15, 13, previewLightOn ? 0xF2D77A : 0xD8CFBF);
+    }
+
+    private function drawSettingsRune(target:MovieClip, cx:Number, cy:Number, color:Number):Void {
+        target.lineStyle(1, color, 92, true, "normal", "none", "miter", 3);
+        target.moveTo(cx - 7, cy - 6); target.lineTo(cx + 7, cy - 6);
+        target.moveTo(cx - 7, cy); target.lineTo(cx + 7, cy);
+        target.moveTo(cx - 7, cy + 6); target.lineTo(cx + 7, cy + 6);
+        drawDiamondLine(target, cx - 3, cy - 6, 2, color);
+        drawDiamondLine(target, cx + 4, cy, 2, color);
+        drawDiamondLine(target, cx - 1, cy + 6, 2, color);
+    }
+
+    private function drawDiamondLine(target:MovieClip, cx:Number, cy:Number, radius:Number, color:Number):Void {
+        target.lineStyle(1, color, 100, true, "normal", "none", "miter", 3);
+        target.moveTo(cx, cy - radius);
+        target.lineTo(cx + radius, cy);
+        target.lineTo(cx, cy + radius);
+        target.lineTo(cx - radius, cy);
+        target.lineTo(cx, cy - radius);
+    }
+
+    private function drawEditIcon(target:MovieClip, cx:Number, cy:Number, color:Number):Void {
+        target.lineStyle(1, color, 100, true, "normal", "none", "miter", 3);
+        target.moveTo(cx - 6, cy - 7); target.lineTo(cx + 3, cy - 7);
+        target.lineTo(cx + 6, cy - 4); target.lineTo(cx + 6, cy + 6);
+        target.lineTo(cx - 6, cy + 6); target.lineTo(cx - 6, cy - 7);
+        target.moveTo(cx + 3, cy - 7); target.lineTo(cx + 3, cy - 4); target.lineTo(cx + 6, cy - 4);
+        target.moveTo(cx - 3, cy - 2); target.lineTo(cx + 1, cy - 2);
+        target.moveTo(cx - 3, cy + 1); target.lineTo(cx - 1, cy + 1);
+        target.lineStyle(2, color, 100, true, "normal", "none", "miter", 3);
+        target.moveTo(cx - 1, cy + 5); target.lineTo(cx + 6, cy - 2);
+        target.lineStyle(1, color, 100, true, "normal", "none", "miter", 3);
+        target.moveTo(cx - 2, cy + 6); target.lineTo(cx - 1, cy + 3); target.lineTo(cx + 1, cy + 5); target.lineTo(cx - 2, cy + 6);
+    }
+
+    private function drawGridIcon(target:MovieClip, cx:Number, cy:Number, color:Number):Void {
+        target.lineStyle(1, color, 100, true, "normal", "none", "miter", 3);
+        rect(target, cx - 10, cy - 8, 8, 6, 0x000000, 0, color, 100, 1);
+        rect(target, cx + 2, cy - 8, 8, 6, 0x000000, 0, color, 100, 1);
+        rect(target, cx - 10, cy + 2, 8, 6, 0x000000, 0, color, 100, 1);
+        rect(target, cx + 2, cy + 2, 8, 6, 0x000000, 0, color, 100, 1);
+    }
+
+    private function drawListIcon(target:MovieClip, cx:Number, cy:Number, color:Number):Void {
+        target.lineStyle(2, color, 100, true, "normal", "none", "miter", 3);
+        var i:Number = -1;
+        while (i <= 1) {
+            target.moveTo(cx - 9, cy + i * 6);
+            target.lineTo(cx + 9, cy + i * 6);
+            i++;
+        }
+    }
+
+    private function drawRotateIcon(target:MovieClip, cx:Number, cy:Number, color:Number):Void {
+        target.lineStyle(1, color, 100, true, "normal", "none", "miter", 3);
+        target.moveTo(cx - 7, cy + 1); target.lineTo(cx - 7, cy - 3); target.lineTo(cx - 3, cy - 7);
+        target.lineTo(cx + 4, cy - 7); target.lineTo(cx + 7, cy - 4);
+        target.moveTo(cx + 7, cy - 7); target.lineTo(cx + 7, cy - 4); target.lineTo(cx + 4, cy - 4);
+        target.moveTo(cx + 7, cy - 1); target.lineTo(cx + 7, cy + 3); target.lineTo(cx + 3, cy + 7);
+        target.lineTo(cx - 4, cy + 7); target.lineTo(cx - 7, cy + 4);
+        target.moveTo(cx - 7, cy + 7); target.lineTo(cx - 7, cy + 4); target.lineTo(cx - 4, cy + 4);
+    }
+
+    private function drawZoomIcon(target:MovieClip, cx:Number, cy:Number, color:Number):Void {
+        target.lineStyle(1, color, 100, true, "normal", "none", "miter", 3);
+        drawCircleLine(target, cx - 2, cy - 2, 5);
+        target.moveTo(cx + 2, cy + 2); target.lineTo(cx + 7, cy + 7);
+        target.moveTo(cx - 5, cy - 2); target.lineTo(cx + 1, cy - 2);
+        target.moveTo(cx - 2, cy - 5); target.lineTo(cx - 2, cy + 1);
+    }
+
+    private function drawAxisIcon(target:MovieClip, cx:Number, cy:Number, color:Number):Void {
+        target.lineStyle(1, color, 100, true, "normal", "none", "miter", 3);
+        target.moveTo(cx - 7, cy); target.lineTo(cx + 7, cy);
+        target.moveTo(cx, cy - 7); target.lineTo(cx, cy + 7);
+        target.moveTo(cx, cy - 7); target.lineTo(cx - 2, cy - 4); target.moveTo(cx, cy - 7); target.lineTo(cx + 2, cy - 4);
+        target.moveTo(cx, cy + 7); target.lineTo(cx - 2, cy + 4); target.moveTo(cx, cy + 7); target.lineTo(cx + 2, cy + 4);
+        target.lineStyle(1, color, 55, true, "normal", "none", "miter", 3);
+        target.moveTo(cx + 7, cy); target.lineTo(cx + 4, cy - 2); target.moveTo(cx + 7, cy); target.lineTo(cx + 4, cy + 2);
+    }
+
+    private function drawLightIcon(target:MovieClip, cx:Number, cy:Number, color:Number):Void {
+        target.lineStyle(1, color, 100, true, "normal", "none", "miter", 3);
+        drawCircleLine(target, cx, cy, 4);
+        var i:Number = 0;
+        while (i < 8) {
+            var angle:Number = i * Math.PI / 4;
+            target.moveTo(cx + Math.cos(angle) * 6, cy + Math.sin(angle) * 6);
+            target.lineTo(cx + Math.cos(angle) * 9, cy + Math.sin(angle) * 9);
+            i++;
+        }
+    }
+
+    private function drawCircleLine(target:MovieClip, cx:Number, cy:Number, radius:Number):Void {
+        var segments:Number = 16;
+        target.moveTo(cx + radius, cy);
+        var i:Number = 1;
+        while (i <= segments) {
+            var angle:Number = i * Math.PI * 2 / segments;
+            target.lineTo(cx + Math.cos(angle) * radius, cy + Math.sin(angle) * radius);
+            i++;
+        }
+    }
+
     private function drawCard(slot:Object, x:Number, y:Number, w:Number, h:Number, active:Boolean, worn:Boolean, equipping:Boolean):Void {
         var card:MovieClip = panel.createEmptyMovieClip("card" + nextDepth, nextDepth++);
         card._x = x; card._y = y; disableFocusTarget(card);
-        var stroke:Number = equipping ? 0xD2B56A : (worn ? 0x91B9DC : (active ? 0x827868 : 0x4A453A));
-        rect(card, 0, 0, w, h, equipping ? 0x29200E : (worn ? 0x14263D : 0x080A0D), 90, stroke, active || worn || equipping ? 88 : 48, active ? 2 : 1);
+        var managedSource:Boolean = manageMode && Number(slot.index) == manageSource;
+        var swapSource:Boolean = managedSource && manageAction == "swap";
+        var stroke:Number = managedSource ? 0xE0B94E : (equipping ? 0xD2B56A : (worn ? 0x91B9DC : (active ? 0x827868 : 0x4A453A)));
+        var cardFill:Number = swapSource ? 0x3B3018 : (equipping ? 0x29200E : (worn ? 0x14263D : 0x080A0D));
+        rect(card, 0, 0, w, h, cardFill, swapSource ? 96 : 90, stroke, managedSource ? 100 : (active || worn || equipping ? 88 : 48), managedSource || active ? 2 : 1);
+        if (manageAction == "swap") drawManagePulse(card, w, h, managedSource);
         if (active && navCursorVisible) drawAnimatedFocus(card, w, h);
         rect(card, 8, 10, 43, 43, 0x111317, 90, 0x8F7B4E, 68, 1);
         drawOutfitIcon(card, 29, 31, classifyOutfit(slot), slot.ready ? 0xD5B96C : 0x68645C);
-        addText(card, "cardNum", 8, 56, 43, 13, twoDigits(slot.index + 1), 9, 0x9C8D6E, true, "center");
-        addText(card, "cardName", 59, 9, 101, 18, clip(slot.name, 14), 12, worn ? 0xEEF7FF : 0xEEE8DC, true, "left");
+        addText(card, "cardNum", 8, h - 16, 43, 13, twoDigits(slot.index + 1), 9, 0x9C8D6E, true, "center");
+        addText(card, "cardName", 59, 9, 101, 18, clip(slot.name, 14), 12, swapSource ? 0xFFF2BE : (worn ? 0xEEF7FF : 0xEEE8DC), true, "left");
+        if (swapSource) drawSwapIcon(card, 146, h - 15, 0xF5D778);
         var self:OutfitPreviewMenu = this; var idx:Number = slot.index;
-        if (!equipping) addClickZone(x, y, w, h, "applySlot", idx);
+        if (!equipping) addClickZone(x, y, w, h, manageMode ? "manageSlot" : "applySlot", idx);
         if (equipping) {
             drawEquipIndicator(card, 68, 42);
             addText(card, "cardEquip", 80, 34, 78, 16, "EQUIPPING", 9, 0xD8C184, true, "left");
@@ -1269,7 +1613,7 @@ class OutfitPreviewMenu {
         }
         if (equipping) return;
         card.useHandCursor = true;
-        card.onRelease = function():Void { if (!self.skipClipRelease()) { self.noteMouseInput(false); self.requestSlotAction("applySlot", idx); } };
+        card.onRelease = function():Void { if (!self.skipClipRelease()) { self.noteMouseInput(false); self.requestSlotAction(self.manageMode ? "manageSlot" : "applySlot", idx); } };
     }
 
     private function drawAnimatedFocus(card:MovieClip, w:Number, h:Number):Void {
@@ -1281,9 +1625,34 @@ class OutfitPreviewMenu {
         focus.moveTo(w - 13, 2); focus.lineTo(w - 2, 2); focus.lineTo(w - 2, 13);
         focus.moveTo(w - 2, h - 13); focus.lineTo(w - 2, h - 2); focus.lineTo(w - 13, h - 2);
         focus.moveTo(13, h - 2); focus.lineTo(2, h - 2); focus.lineTo(2, h - 13);
+        focus._alpha = 72 + Math.sin(getTimer() / 180) * 24;
         focus.onEnterFrame = function():Void {
             this._alpha = 72 + Math.sin(getTimer() / 180) * 24;
         };
+    }
+
+    private function drawManagePulse(target:MovieClip, w:Number, h:Number, selectedSource:Boolean):Void {
+        var pulse:MovieClip = target.createEmptyMovieClip("managePulse" + nextDepth, nextDepth++);
+        rect(pulse, 2, 2, w - 4, h - 4, 0x000000, 0, selectedSource ? 0xF0CD68 : 0xA88642, selectedSource ? 100 : 64, selectedSource ? 2 : 1);
+        var phase:Number = Number(target._y) * 0.03 + Number(target._x) * 0.01;
+        pulse._alpha = (selectedSource ? 76 : 34) + Math.sin(getTimer() / 220 + phase) * (selectedSource ? 22 : 16);
+        pulse.onEnterFrame = function():Void {
+            this._alpha = (selectedSource ? 76 : 34) + Math.sin(getTimer() / 220 + phase) * (selectedSource ? 22 : 16);
+        };
+    }
+
+    private function drawSwapIcon(target:MovieClip, cx:Number, cy:Number, color:Number):Void {
+        target.lineStyle(2, color, 100, true, "normal", "none", "miter", 3);
+        target.moveTo(cx - 10, cy - 4);
+        target.lineTo(cx + 7, cy - 4);
+        target.lineTo(cx + 3, cy - 8);
+        target.moveTo(cx + 7, cy - 4);
+        target.lineTo(cx + 3, cy);
+        target.moveTo(cx + 10, cy + 5);
+        target.lineTo(cx - 7, cy + 5);
+        target.lineTo(cx - 3, cy + 1);
+        target.moveTo(cx - 7, cy + 5);
+        target.lineTo(cx - 3, cy + 9);
     }
 
     private function classifyOutfit(slot:Object):String {
@@ -1375,16 +1744,22 @@ class OutfitPreviewMenu {
         row._y = y;
         disableFocusTarget(row);
         var debugActive:Boolean = active && debugFocusHighlight;
-        var fill:Number = equipping ? 0x29200E : (worn ? 0x14263D : (debugActive ? 0x11161C : 0x07090C));
-        var fillAlpha:Number = equipping ? 94 : (worn ? 92 : (debugActive ? 78 : 74));
-        var stroke:Number = equipping ? 0xD2B56A : (worn ? 0x91B9DC : (debugActive ? 0x827868 : -1));
-        var strokeAlpha:Number = equipping ? 90 : (worn ? 100 : (debugActive ? 90 : 0));
-        var strokeWidth:Number = equipping ? 1 : (worn ? 2 : (debugActive ? 1 : 0));
-        var textColor:Number = worn ? 0xEEF7FF : 0xEEE8DC;
+        var managedSource:Boolean = manageMode && Number(slot.index) == manageSource;
+        var swapSource:Boolean = managedSource && manageAction == "swap";
+        var fill:Number = swapSource ? 0x3B3018 : (equipping ? 0x29200E : (worn ? 0x14263D : (debugActive ? 0x11161C : 0x07090C)));
+        var fillAlpha:Number = swapSource ? 96 : (equipping ? 94 : (worn ? 92 : (debugActive ? 78 : 74)));
+        var stroke:Number = managedSource ? 0xE0B94E : (equipping ? 0xD2B56A : (worn ? 0x91B9DC : (debugActive ? 0x827868 : -1)));
+        var strokeAlpha:Number = managedSource ? 100 : (equipping ? 90 : (worn ? 100 : (debugActive ? 90 : 0)));
+        var strokeWidth:Number = managedSource ? 2 : (equipping ? 1 : (worn ? 2 : (debugActive ? 1 : 0)));
+        var textColor:Number = swapSource ? 0xFFF2BE : (worn ? 0xEEF7FF : 0xEEE8DC);
         var metaColor:Number = worn ? 0xB7CEE3 : (slot.ready ? 0xC8BA98 : 0x8C9298);
         rect(row, 0, 0, w, h, fill, fillAlpha, stroke, strokeAlpha, strokeWidth);
+        if (manageAction == "swap") drawManagePulse(row, w, h, managedSource);
         if (active && listColumn == 0 && navCursorVisible) drawAnimatedFocus(row, w, h);
-        rect(row, 0, 0, worn ? 6 : (active ? 4 : 3), h, worn ? 0xAACAE7 : (slot.ready ? 0xB8A074 : 0x5F656B), worn ? 100 : (active ? 95 : 90), -1, 0, 0);
+        var activeBarColor:Number = swapSource ? 0xF5D778 : (worn ? 0xAACAE7 : (slot.ready ? 0xB8A074 : 0x5F656B));
+        var activeBarAlpha:Number = swapSource ? 100 : (worn ? 100 : (active ? 95 : 90));
+        if (manageMode && !swapSource) activeBarAlpha = Math.max(55, activeBarAlpha - 20);
+        rect(row, 0, 0, worn ? 6 : (active ? 4 : 3), h, activeBarColor, activeBarAlpha, -1, 0, 0);
         if (worn) {
             rect(row, 3, 3, w - 6, h - 6, 0x000000, 0, 0xC8B574, 62, 1);
             drawMysticMark(row, w - 9, Math.floor(h / 2));
@@ -1398,6 +1773,7 @@ class OutfitPreviewMenu {
             addText(row, "count", 170, 8, 52, 18, shortCount(slot.count), 11, metaColor, false, "right");
             addText(row, "armor", 224, 8, 42, 18, "AR " + slot.armor, 11, metaColor, false, "right");
         }
+        if (swapSource) drawSwapIcon(row, 322, Math.floor(h / 2), 0xF5D778);
 
         if (worn && animateCurrent) {
             animateOutfitRow(row);
@@ -1408,7 +1784,7 @@ class OutfitPreviewMenu {
 
         var self:OutfitPreviewMenu = this;
         var idx:Number = slot.index;
-        addClickZone(x, y, w, h, "applySlot", idx);
+        addClickZone(x, y, w, h, manageMode ? "manageSlot" : "applySlot", idx);
         row.useHandCursor = true;
         row.onRollOver = function():Void {
             Mouse.show();
@@ -1418,10 +1794,10 @@ class OutfitPreviewMenu {
                 return;
             }
             self.noteMouseInput(false);
-            self.requestSlotAction("applySlot", idx);
+            self.requestSlotAction(self.manageMode ? "manageSlot" : "applySlot", idx);
         };
 
-        drawEditButton(x + 270, y + 4, idx, active && listColumn == 1);
+        if (!manageMode) drawEditButton(x + 318, y + 5, idx, active && listColumn == 1);
     }
 
     private function drawEditButton(x:Number, y:Number, idx:Number, active:Boolean):Void {
@@ -1430,12 +1806,12 @@ class OutfitPreviewMenu {
         edit._y = y;
         disableFocusTarget(edit);
         var debugActive:Boolean = active && debugFocusHighlight;
-        rect(edit, 0, 0, 64, 25, debugActive ? 0x141516 : 0x101112, debugActive ? 78 : 75, debugActive ? 0x827868 : 0x4A5056, debugActive ? 88 : 45, 1);
-        if (active && navCursorVisible) drawAnimatedFocus(edit, 64, 25);
-        addText(edit, "edit", 0, 5, 64, 16, "Edit", 11, 0xEEE8DC, false, "center");
+        rect(edit, 0, 0, 22, 22, debugActive ? 0x141516 : 0x101112, debugActive ? 78 : 75, debugActive ? 0x827868 : 0x4A5056, debugActive ? 88 : 45, 1);
+        if (active && navCursorVisible) drawAnimatedFocus(edit, 22, 22);
+        drawEditIcon(edit, 11, 11, active ? 0xF0D57E : 0xD7CEBE);
 
         var self:OutfitPreviewMenu = this;
-        addClickZone(x, y, 64, 25, "editSlot", idx);
+        addClickZone(x, y, 22, 22, "editSlot", idx);
         edit.useHandCursor = true;
         edit.onRollOver = function():Void {
             Mouse.show();
@@ -1554,7 +1930,22 @@ class OutfitPreviewMenu {
 
     private function focusAction(action:String, idx:Number):Void {
         if (viewMode == "list") {
-            if (action == "close") {
+            if (action == "cameraRotate" || action == "cameraZoom" || action == "cameraVertical" || action == "cameraLight") {
+                listRow = -3;
+                listColumn = action == "cameraRotate" ? 0 : (action == "cameraZoom" ? 1 : (action == "cameraVertical" ? 2 : 3));
+            } else if (action == "toggleManage") {
+                listRow = manageMode ? -2 : -1;
+                listColumn = 0;
+            } else if (action == "manageCopy") {
+                listRow = -1;
+                listColumn = 0;
+            } else if (action == "manageSwap") {
+                listRow = -1;
+                listColumn = 1;
+            } else if (action == "manageDelete") {
+                listRow = -1;
+                listColumn = 2;
+            } else if (action == "close") {
                 listRow = slots.length + 1;
             } else if (action == "toggleCards" || action == "prevPage" || action == "nextPage") {
                 listRow = slots.length;
@@ -1611,7 +2002,169 @@ class OutfitPreviewMenu {
             requestPageChange(-1);
         } else if (action == "nextPage") {
             requestPageChange(1);
+        } else if (action == "cameraRotate") {
+            chooseCameraMode(0);
+        } else if (action == "cameraZoom") {
+            chooseCameraMode(1);
+        } else if (action == "cameraVertical") {
+            chooseCameraMode(2);
+        } else if (action == "cameraLight") {
+            togglePreviewLight();
+        } else if (action == "toggleManage") {
+            toggleManageMode();
+        } else if (action == "manageCopy") {
+            chooseManageAction("copy");
+        } else if (action == "manageSwap") {
+            chooseManageAction("swap");
+        } else if (action == "manageDelete") {
+            chooseManageAction("delete");
+        } else if (action == "manageSlot") {
+            handleManageSlot(idx);
         }
+    }
+
+    private function runManageTopAction(column:Number):Void {
+        if (!manageMode) {
+            toggleManageMode();
+        } else if (column == 0) {
+            chooseManageAction("copy");
+        } else if (column == 1) {
+            chooseManageAction("swap");
+        } else {
+            chooseManageAction("delete");
+        }
+    }
+
+    private function toggleManageMode():Void {
+        if (equippingIndex >= 0) return;
+        manageMode = !manageMode;
+        manageSource = -1;
+        manageAction = "";
+        manageDeleteArmed = false;
+        manageHint = manageMode ? "SELECT A PRESET" : "";
+        managePointerDown = false;
+        manageDragging = false;
+        removeManageDragGhost();
+        cameraMode = 0;
+        applyCameraMode();
+        listRow = manageMode ? -2 : selected;
+        listColumn = 0;
+        manageTransitionPending = manageMode;
+        draw();
+    }
+
+    private function chooseManageAction(action:String):Void {
+        if (!manageMode) return;
+        if (action == "swap") {
+            manageSource = -1;
+            manageAction = "swap";
+            manageDeleteArmed = false;
+            manageHint = "SELECT FIRST PRESET";
+            draw();
+            return;
+        }
+        if (manageSource < 0) {
+            manageAction = "";
+            manageDeleteArmed = false;
+            manageHint = "SELECT A PRESET FIRST";
+            draw();
+            return;
+        }
+        if (action == "delete") {
+            if (manageDeleteArmed) {
+                performManageAction("delete", manageSource);
+            } else {
+                manageAction = "delete";
+                manageDeleteArmed = true;
+                manageHint = "PRESS CONFIRM TO DELETE";
+                draw();
+            }
+            return;
+        }
+        manageAction = action;
+        manageDeleteArmed = false;
+        manageHint = "SELECT DESTINATION  -  OVERWRITES";
+        draw();
+    }
+
+    private function handleManageSlot(idx:Number):Void {
+        if (!manageMode || idx < 0 || idx >= 50) return;
+        selectIndex(idx, false);
+        listRow = selected;
+        listColumn = 0;
+        if (manageAction == "swap") {
+            if (manageSource < 0) {
+                manageSource = idx;
+                manageDeleteArmed = false;
+                manageHint = "SELECT SECOND PRESET";
+                draw();
+            } else {
+                performManageAction("swap", idx);
+            }
+            return;
+        }
+        if (manageAction != "" && manageAction != "delete" && manageSource >= 0) {
+            performManageAction(manageAction, idx);
+            return;
+        }
+        manageSource = idx;
+        manageAction = "";
+        manageDeleteArmed = false;
+        manageHint = "CHOOSE COPY, SWAP, DELETE, OR DRAG";
+        draw();
+    }
+
+    private function performManageAction(action:String, targetIndex:Number):Void {
+        if (manageSource < 0) return;
+        var sourceIndex:Number = manageSource;
+        if (action != "delete" && sourceIndex == targetIndex) {
+            manageDeleteArmed = false;
+            if (action == "swap") {
+                manageHint = "CHOOSE A DIFFERENT PRESET";
+            } else {
+                manageAction = "";
+                manageHint = "SOURCE AND DESTINATION MATCH";
+            }
+            draw();
+            return;
+        }
+        var eventName:String = "";
+        if (action == "copy") eventName = "OPS_CopyPreset";
+        else if (action == "move") eventName = "OPS_MovePreset";
+        else if (action == "swap") eventName = "OPS_SwapPreset";
+        else if (action == "delete") eventName = "OPS_DeletePreset";
+        else if (action == "reorder") eventName = "OPS_ReorderPreset";
+        if (eventName == "") return;
+
+        sendEvent(eventName, "", sourceIndex * 100 + targetIndex);
+        if (action == "swap") swapLocalSlots(sourceIndex, targetIndex);
+        manageSource = action == "delete" || action == "swap" ? -1 : targetIndex;
+        manageAction = "";
+        manageDeleteArmed = false;
+        manageHint = action == "swap" ? "SWAP COMPLETE  -  CHOOSE SWAP TO REPEAT" : action.toUpperCase() + " COMPLETE";
+        selected = Math.max(0, targetIndex);
+        editIndex = selected;
+        listRow = selected;
+        draw();
+    }
+
+    private function swapLocalSlots(sourceIndex:Number, targetIndex:Number):Void {
+        var sourcePosition:Number = -1;
+        var targetPosition:Number = -1;
+        var i:Number = 0;
+        while (i < slots.length) {
+            if (Number(slots[i].index) == sourceIndex) sourcePosition = i;
+            if (Number(slots[i].index) == targetIndex) targetPosition = i;
+            i++;
+        }
+        if (sourcePosition < 0 || targetPosition < 0) return;
+        var temporary:Object = slots[sourcePosition];
+        slots[sourcePosition] = slots[targetPosition];
+        slots[targetPosition] = temporary;
+        slots[sourcePosition].index = sourceIndex;
+        slots[targetPosition].index = targetIndex;
+        if (lastApplied == sourceIndex) lastApplied = targetIndex;
+        else if (lastApplied == targetIndex) lastApplied = sourceIndex;
     }
 
     private function requestCardViewToggle():Void {
@@ -1731,6 +2284,15 @@ class OutfitPreviewMenu {
         return undefined;
     }
 
+    private function getSlotByIndex(idx:Number):Object {
+        var i:Number = 0;
+        while (i < slots.length) {
+            if (Number(slots[i].index) == idx) return slots[i];
+            i++;
+        }
+        return undefined;
+    }
+
     private function getEquippedSlot():Object {
         if (lastApplied < 0) return undefined;
         var i:Number = 0;
@@ -1814,7 +2376,9 @@ class OutfitPreviewMenu {
             if (mx >= zone.x && mx <= zone.x + zone.w && my >= zone.y && my <= zone.y + zone.h) {
                 noteMouseInput(false);
                 lastMouseHitTime = getTimer();
-                if (zone.action == "applySlot") {
+                if (zone.action == "manageSlot") {
+                    beginManagePointer(Number(zone.idx), stageX, stageY);
+                } else if (zone.action == "applySlot") {
                     requestSlotAction("applySlot", Number(zone.idx));
                 } else if (zone.action == "editSlot") {
                     requestSlotAction("editSlot", Number(zone.idx));
@@ -1827,6 +2391,120 @@ class OutfitPreviewMenu {
             i--;
         }
         return false;
+    }
+
+    private function beginManagePointer(idx:Number, stageX:Number, stageY:Number):Void {
+        if (!manageMode || idx < 0 || idx >= 50) return;
+        managePointerDown = true;
+        managePointerSlot = idx;
+        manageStartX = stageX;
+        manageStartY = stageY;
+        manageDragging = false;
+        manageHoverDirection = 0;
+        manageHoverStarted = 0;
+    }
+
+    private function updateManagePointer(stageX:Number, stageY:Number):Void {
+        if (!managePointerDown) return;
+        if (!manageDragging && (Math.abs(stageX - manageStartX) >= 7 || Math.abs(stageY - manageStartY) >= 7)) {
+            manageDragging = true;
+            manageSource = managePointerSlot;
+            manageAction = "";
+            manageDeleteArmed = false;
+            manageHint = "DROP TO REORDER  -  HOLD AT EDGE FOR PAGE";
+            createManageDragGhost(managePointerSlot);
+            draw();
+        }
+        if (!manageDragging) return;
+        if (manageDragGhost != undefined) {
+            manageDragGhost._x = stageX + 14;
+            manageDragGhost._y = stageY + 10;
+        }
+        var localX:Number = panel == undefined ? 0 : (stageX - panel._x) / menuScale;
+        var localY:Number = panel == undefined ? 0 : (stageY - panel._y) / menuScale;
+        var direction:Number = 0;
+        if (localY >= 76 && localY <= 620) {
+            if (localX <= 96 && currentPage > 0) direction = -1;
+            else if (localX >= 408 && currentPage < getPageCount() - 1) direction = 1;
+        }
+        if (direction != manageHoverDirection) {
+            manageHoverDirection = direction;
+            manageHoverStarted = direction == 0 ? 0 : getTimer();
+        }
+    }
+
+    private function tickManagePageHover():Void {
+        if (!manageDragging || manageHoverDirection == 0 || manageHoverStarted <= 0) return;
+        var now:Number = getTimer();
+        if (now - manageHoverStarted < 550 || pageChangePending || viewChangePending || slotActionPending) return;
+        var targetPage:Number = currentPage + manageHoverDirection;
+        if (targetPage < 0 || targetPage >= getPageCount()) {
+            manageHoverDirection = 0;
+            manageHoverStarted = 0;
+            return;
+        }
+        currentPage = targetPage;
+        selected = Math.min(currentPage * pageSize, slots.length - 1);
+        editIndex = selected;
+        listRow = selected;
+        listColumn = 0;
+        lastPageChangeTime = now;
+        manageHoverStarted = now;
+        draw();
+    }
+
+    private function finishManagePointer(stageX:Number, stageY:Number):Void {
+        if (!managePointerDown) return;
+        var clickedSlot:Number = managePointerSlot;
+        var wasDragging:Boolean = manageDragging;
+        managePointerDown = false;
+        managePointerSlot = -1;
+        manageDragging = false;
+        manageHoverDirection = 0;
+        manageHoverStarted = 0;
+        removeManageDragGhost();
+        if (wasDragging) {
+            var target:Number = getManageSlotAt(stageX, stageY);
+            if (target >= 0 && target != manageSource) {
+                performManageAction("reorder", target);
+            } else {
+                manageHint = target == manageSource ? "PRESET KEPT IN PLACE" : "DROP CANCELLED";
+                draw();
+            }
+        } else {
+            handleManageSlot(clickedSlot);
+        }
+    }
+
+    private function getManageSlotAt(stageX:Number, stageY:Number):Number {
+        if (panel == undefined || menuScale <= 0) return -1;
+        var mx:Number = (stageX - panel._x) / menuScale;
+        var my:Number = (stageY - panel._y) / menuScale;
+        var i:Number = clickZones.length - 1;
+        while (i >= 0) {
+            var zone:Object = clickZones[i];
+            if (zone.action == "manageSlot" && mx >= zone.x && mx <= zone.x + zone.w && my >= zone.y && my <= zone.y + zone.h) return Number(zone.idx);
+            i--;
+        }
+        return -1;
+    }
+
+    private function createManageDragGhost(idx:Number):Void {
+        removeManageDragGhost();
+        var slot:Object = getSlotByIndex(idx);
+        if (slot == undefined) return;
+        manageDragGhost = root.createEmptyMovieClip("opsManageDragGhost", 9991);
+        rect(manageDragGhost, 0, 0, 176, 42, 0x07090C, 92, 0xE0B94E, 100, 2);
+        addText(manageDragGhost, "dragNum", 8, 7, 30, 20, twoDigits(idx + 1), 12, 0xD3B56D, true, "left");
+        addText(manageDragGhost, "dragName", 42, 7, 124, 20, clip(slot.name, 18), 12, 0xEEE8DC, true, "left");
+        manageDragGhost._alpha = 88;
+    }
+
+    private function removeManageDragGhost():Void {
+        if (manageDragGhost != undefined) {
+            manageDragGhost.removeMovieClip();
+            manageDragGhost = undefined;
+        }
     }
 
     private function skipClipRelease():Boolean {
@@ -1983,6 +2661,40 @@ class OutfitPreviewMenu {
             this._alpha = Math.round(100 * eased);
             sweep._xscale = Math.round(100 * eased);
             sweep._alpha = Math.round(72 * Math.sin(progress * Math.PI));
+        };
+    }
+
+    private function animateManageTransition():Void {
+        if (panel == undefined) return;
+        var clip:MovieClip = panel;
+        var targetX:Number = clip._x;
+        var targetY:Number = clip._y;
+        var started:Number = getTimer();
+        var sweep:MovieClip = clip.createEmptyMovieClip("manageSweep" + nextDepth, nextDepth++);
+        sweep._x = 78;
+        sweep._y = 147;
+        rect(sweep, 0, 0, 348, 2, 0xE7C96E, 100, -1, 0, 0);
+        sweep._xscale = 0;
+        sweep._alpha = 0;
+        clip._x = targetX + 10;
+        clip._y = targetY - 4;
+        clip._alpha = 58;
+        clip.onEnterFrame = function():Void {
+            var progress:Number = (getTimer() - started) / 300;
+            if (progress >= 1) {
+                this._x = targetX;
+                this._y = targetY;
+                this._alpha = 100;
+                sweep.removeMovieClip();
+                delete this.onEnterFrame;
+                return;
+            }
+            var eased:Number = 1 - Math.pow(1 - progress, 3);
+            this._x = targetX + 10 * (1 - eased);
+            this._y = targetY - 4 * (1 - eased);
+            this._alpha = 58 + Math.round(42 * eased);
+            sweep._xscale = Math.round(100 * eased);
+            sweep._alpha = Math.round(76 * Math.sin(progress * Math.PI));
         };
     }
 

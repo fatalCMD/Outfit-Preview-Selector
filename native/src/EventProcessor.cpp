@@ -10,13 +10,18 @@ namespace
 	constexpr std::string_view OPEN_EVENT = "OPS_NativePreviewOpen";
 	constexpr std::string_view CLOSE_EVENT = "OPS_NativePreviewClose";
 	constexpr std::string_view ROTATE_EVENT = "OPS_RotatePlayer";
-	constexpr std::string_view LIGHT_EVENT = "OPS_TogglePreviewLight";
 	constexpr std::string_view MOUSE_CLICK_EVENT = "OPS_NativeMouseClick";
 	constexpr std::string_view MOUSE_MOVE_EVENT = "OPS_NativeMouseMove";
+	constexpr std::string_view CAMERA_HEIGHT_EVENT = "OPS_CameraHeightAdjusted";
 	constexpr std::uint32_t LEFT_MOUSE_BUTTON = 0;
 	constexpr std::uint32_t RIGHT_MOUSE_BUTTON = 1;
-	constexpr float ROTATION_AMOUNT = 0.10f;
-	constexpr float TURN_SENSITIVITY = 3.0f;
+	constexpr float TURN_SENSITIVITY = 0.5f;
+	constexpr float MOUSE_ROTATION_SENSITIVITY = 0.018f;
+	constexpr float STICK_ROTATION_SENSITIVITY = 0.08f;
+	constexpr float ZOOM_MOUSE_SENSITIVITY = 0.35f;
+	constexpr float HEIGHT_MOUSE_SENSITIVITY = 0.22f;
+	constexpr float ZOOM_STICK_SENSITIVITY = 2.4f;
+	constexpr float HEIGHT_STICK_SENSITIVITY = 1.6f;
 	constexpr float DEFAULT_MOUSE_WIDTH = 1280.0f;
 	constexpr float DEFAULT_MOUSE_HEIGHT = 720.0f;
 	constexpr DWORD MOUSE_MOVE_EVENT_INTERVAL_MS = 16;
@@ -162,6 +167,18 @@ namespace
 		event.eventName = RE::BSFixedString(a_eventName.data());
 		event.strArg = RE::BSFixedString(BuildCursorPayload());
 		event.numArg = 0.0f;
+		event.sender = nullptr;
+		source->SendEvent(&event);
+	}
+
+	void SendFloatEvent(std::string_view a_eventName, float a_value)
+	{
+		auto* source = SKSE::GetModCallbackEventSource();
+		if (!source) return;
+		SKSE::ModCallbackEvent event{};
+		event.eventName = RE::BSFixedString(a_eventName.data());
+		event.strArg = RE::BSFixedString("");
+		event.numArg = a_value;
 		event.sender = nullptr;
 		source->SendEvent(&event);
 	}
@@ -347,9 +364,7 @@ RE::BSEventNotifyControl EventProcessor::ProcessEvent(
 		previewRequested = false;
 	} else if (a_event->eventName == ROTATE_EVENT && menuOpen) {
 		const float direction = a_event->numArg >= 0.0f ? -1.0f : 1.0f;
-		RotatePreview(direction);
-	} else if (a_event->eventName == LIGHT_EVENT && menuOpen) {
-		MenuCamera::GetSingleton().SetPreviewLight(a_event->numArg > 0.0f);
+		RotatePreview(direction * 0.10f);
 	}
 
 	return RE::BSEventNotifyControl::kContinue;
@@ -378,9 +393,9 @@ RE::BSEventNotifyControl EventProcessor::ProcessEvent(
 						if (button->IsDown() && mouseButton == LEFT_MOUSE_BUTTON) {
 							SendNativeMouseClick();
 						}
-						allowRotation = mouseButton == RIGHT_MOUSE_BUTTON && button->IsPressed();
+						allowCameraControl = mouseButton == RIGHT_MOUSE_BUTTON && button->IsPressed();
 					} else {
-						allowRotation = false;
+						allowCameraControl = false;
 					}
 				}
 			}
@@ -388,19 +403,49 @@ RE::BSEventNotifyControl EventProcessor::ProcessEvent(
 		case RE::INPUT_EVENT_TYPE::kMouseMove:
 			{
 				auto* mouse = reinterpret_cast<RE::MouseMoveEvent*>(event->AsIDEvent());
-				if (mouse) {
+				if (mouse && !allowCameraControl) {
 					UpdateNativeMousePosition(*mouse);
 				}
-				if (allowRotation && mouse && std::abs(mouse->mouseInputX) >= TURN_SENSITIVITY) {
-					RotatePreview(mouse->mouseInputX > 0 ? -1.0f : 1.0f);
+				if (allowCameraControl && mouse) {
+					auto& menuCamera = MenuCamera::GetSingleton();
+					switch (menuCamera.GetControlMode()) {
+					case MenuCamera::ControlMode::kZoom:
+						if (std::abs(mouse->mouseInputY) >= TURN_SENSITIVITY) {
+							menuCamera.AdjustZoom(mouse->mouseInputY * ZOOM_MOUSE_SENSITIVITY);
+						}
+						break;
+					case MenuCamera::ControlMode::kVertical:
+						if (std::abs(mouse->mouseInputY) >= TURN_SENSITIVITY) {
+							menuCamera.AdjustHeight(-mouse->mouseInputY * HEIGHT_MOUSE_SENSITIVITY);
+						}
+						break;
+					default:
+						if (std::abs(mouse->mouseInputX) >= TURN_SENSITIVITY) {
+							RotatePreview(-mouse->mouseInputX * MOUSE_ROTATION_SENSITIVITY);
+						}
+						break;
+					}
 				}
 			}
 			break;
 		case RE::INPUT_EVENT_TYPE::kThumbstick:
 			{
 				auto* stick = reinterpret_cast<RE::ThumbstickEvent*>(event->AsIDEvent());
-				if (stick && stick->IsRight() && std::abs(stick->xValue) > 0.15f && std::abs(stick->yValue) < 0.75f) {
-					RotatePreview(stick->xValue > 0.0f ? -1.0f : 1.0f);
+				if (stick && stick->IsRight()) {
+					auto& menuCamera = MenuCamera::GetSingleton();
+					switch (menuCamera.GetControlMode()) {
+					case MenuCamera::ControlMode::kZoom:
+						if (std::abs(stick->yValue) > 0.15f) menuCamera.AdjustZoom(-stick->yValue * ZOOM_STICK_SENSITIVITY);
+						break;
+					case MenuCamera::ControlMode::kVertical:
+						if (std::abs(stick->yValue) > 0.15f) menuCamera.AdjustHeight(stick->yValue * HEIGHT_STICK_SENSITIVITY);
+						break;
+					default:
+						if (std::abs(stick->xValue) > 0.15f && std::abs(stick->yValue) < 0.75f) {
+							RotatePreview(-stick->xValue * STICK_ROTATION_SENSITIVITY);
+						}
+						break;
+					}
 				}
 			}
 			break;
@@ -437,6 +482,7 @@ void EventProcessor::StartPreview()
 	SeedNativeMouse();
 	HideOtherMenus();
 	QueueVanillaMenuBlurClear();
+	MenuCamera::GetSingleton().SetControlMode(0);
 
 	if (MenuCamera::GetSingleton().IsActive()) {
 		MenuCamera::GetSingleton().ApplySettings();
@@ -453,10 +499,13 @@ void EventProcessor::StopPreview()
 		return;
 	}
 
-	MenuCamera::GetSingleton().Stop();
+	auto& menuCamera = MenuCamera::GetSingleton();
+	const float savedPreviewHeight = menuCamera.GetPreviewHeight();
+	menuCamera.Stop();
+	SendFloatEvent(CAMERA_HEIGHT_EVENT, savedPreviewHeight);
 	RestoreOtherMenus();
 	menuOpen = false;
-	allowRotation = false;
+	allowCameraControl = false;
 	ClearNativeMouse();
 	QueueVanillaMenuBlurClear();
 }
@@ -521,19 +570,5 @@ void EventProcessor::RestoreOtherMenus()
 
 void EventProcessor::RotatePreview(float a_direction)
 {
-	auto* player = RE::PlayerCharacter::GetSingleton();
-	auto* camera = RE::PlayerCamera::GetSingleton();
-	if (!player || !camera || !player->Is3DLoaded()) {
-		return;
-	}
-
-	auto* thirdState = static_cast<RE::ThirdPersonState*>(camera->currentState.get());
-	if (!thirdState) {
-		return;
-	}
-
-	player->SetRotationZ(player->data.angle.z + (a_direction * ROTATION_AMOUNT));
-	thirdState->freeRotation.x -= (a_direction * ROTATION_AMOUNT);
-	player->Update3DPosition(true);
-	camera->Update();
+	MenuCamera::GetSingleton().RotateCharacter(a_direction);
 }

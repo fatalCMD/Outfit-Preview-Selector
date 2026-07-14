@@ -87,8 +87,12 @@ bool MenuCamera::Start()
 		return false;
 	}
 
+	controlMode = ControlMode::kRotate;
+	previewDistance = std::clamp(Settings::distance, 80.0f, 360.0f);
+	previewHeight = std::clamp(Settings::offsetZ, -120.0f, 120.0f);
+	cameraValuesDirty = false;
 	active = true;
-	ApplyCameraValues(player, camera, thirdState);
+	ApplyCameraValues(player, camera, thirdState, true);
 	if (Settings::previewLightDefaultOn) {
 		SetPreviewLight(true);
 	}
@@ -100,6 +104,10 @@ void MenuCamera::Stop()
 {
 	if (!active) {
 		return;
+	}
+	if (cameraValuesDirty) {
+		Settings::SaveCameraValues(previewDistance, previewHeight);
+		cameraValuesDirty = false;
 	}
 
 	auto* player = RE::PlayerCharacter::GetSingleton();
@@ -184,6 +192,7 @@ void MenuCamera::Stop()
 		mouseWheelZoomSpeed->data.f = savedMouseWheelZoomSpeed;
 	}
 
+	controlMode = ControlMode::kRotate;
 	ResetSavedState();
 	logger::info("[MenuCamera] Stopped and restored camera state.");
 }
@@ -205,7 +214,7 @@ void MenuCamera::ApplySettings()
 		return;
 	}
 
-	ApplyCameraValues(player, camera, thirdState);
+	ApplyCameraValues(player, camera, thirdState, false);
 	if (previewLightEnabled) {
 		ApplyPreviewLight(player);
 	}
@@ -220,6 +229,50 @@ void MenuCamera::SetUserOffsets(float a_side, float a_height)
 {
 	Settings::offsetX = std::clamp(a_side, -160.0f, 160.0f);
 	Settings::offsetZ = std::clamp(a_height, -120.0f, 120.0f);
+	previewHeight = Settings::offsetZ;
+	ApplySettings();
+}
+
+void MenuCamera::SetControlMode(std::uint32_t a_mode)
+{
+	switch (a_mode) {
+	case 1:
+		controlMode = ControlMode::kZoom;
+		break;
+	case 2:
+		controlMode = ControlMode::kVertical;
+		break;
+	default:
+		controlMode = ControlMode::kRotate;
+		break;
+	}
+}
+
+MenuCamera::ControlMode MenuCamera::GetControlMode() const
+{
+	return controlMode;
+}
+
+float MenuCamera::GetPreviewHeight() const
+{
+	return previewHeight;
+}
+
+void MenuCamera::AdjustZoom(float a_delta)
+{
+	if (!active || !std::isfinite(a_delta)) return;
+	previewDistance = std::clamp(previewDistance + a_delta, 80.0f, 360.0f);
+	Settings::distance = previewDistance;
+	cameraValuesDirty = true;
+	ApplySettings();
+}
+
+void MenuCamera::AdjustHeight(float a_delta)
+{
+	if (!active || !std::isfinite(a_delta)) return;
+	previewHeight = std::clamp(previewHeight + a_delta, -120.0f, 120.0f);
+	Settings::offsetZ = previewHeight;
+	cameraValuesDirty = true;
 	ApplySettings();
 }
 
@@ -236,6 +289,25 @@ void MenuCamera::SetPreviewLight(bool a_enable)
 	} else {
 		RestorePreviewLight();
 	}
+}
+
+void MenuCamera::RotateCharacter(float a_radians)
+{
+	if (!active || !std::isfinite(a_radians)) {
+		return;
+	}
+
+	auto* player = RE::PlayerCharacter::GetSingleton();
+	auto* camera = RE::PlayerCamera::GetSingleton();
+	if (!player || !camera || !player->Is3DLoaded()) return;
+	auto* thirdState = static_cast<RE::ThirdPersonState*>(camera->cameraStates[RE::CameraState::kThirdPerson].get());
+	if (!thirdState) return;
+
+	const float rotation = std::clamp(a_radians, -0.18f, 0.18f);
+	player->SetRotationZ(player->data.angle.z + rotation);
+	thirdState->freeRotation.x = std::remainder(thirdState->freeRotation.x - rotation, PI * 2.0f);
+	player->Update3DPosition(false);
+	camera->Update();
 }
 
 bool MenuCamera::CaptureState(RE::PlayerCharacter* a_player, RE::PlayerCamera* a_camera, RE::ThirdPersonState* a_thirdState)
@@ -304,6 +376,8 @@ bool MenuCamera::CaptureLightState(RE::PlayerCharacter* a_player)
 	savedLightLodDimmer = savedLight->lodDimmer;
 	savedLightNeverFades = savedLight->neverFades;
 	savedLightAffectLand = savedLight->affectLand;
+	savedLightLocalPosition = savedLight->light->local.translate;
+	savedLightPositionCaptured = true;
 	lightStateCaptured = true;
 	return true;
 }
@@ -340,6 +414,10 @@ void MenuCamera::ApplyPreviewLight(RE::PlayerCharacter* a_player)
 	savedLight->lodDimmer = 1.0f;
 	savedLight->neverFades = true;
 	savedLight->affectLand = false;
+	savedLight->light->local.translate = RE::NiPoint3(
+		std::clamp(Settings::lightOffsetX, -240.0f, 240.0f),
+		std::clamp(Settings::lightOffsetY, -240.0f, 240.0f),
+		std::clamp(Settings::lightOffsetZ, -80.0f, 240.0f));
 	previewLightEnabled = true;
 
 	if (a_player) {
@@ -347,36 +425,42 @@ void MenuCamera::ApplyPreviewLight(RE::PlayerCharacter* a_player)
 	}
 }
 
-void MenuCamera::ApplyCameraValues(RE::PlayerCharacter* a_player, RE::PlayerCamera* a_camera, RE::ThirdPersonState* a_thirdState)
+void MenuCamera::ApplyCameraValues(RE::PlayerCharacter* a_player, RE::PlayerCamera* a_camera, RE::ThirdPersonState* a_thirdState, bool a_resetOrientation)
 {
 	if (!a_player || !a_camera || !a_thirdState) {
 		return;
 	}
 
 	a_camera->cameraTarget = a_player;
-	a_camera->SetState(a_thirdState);
-
 	a_thirdState->toggleAnimCam = true;
 	a_thirdState->freeRotationEnabled = true;
-	a_thirdState->freeRotation.x = PI - 0.5f;
-	a_thirdState->freeRotation.y = 0.0f;
-	a_thirdState->targetZoomOffset = 0.0f;
-	a_thirdState->pitchZoomOffset = 0.1f;
+	if (a_resetOrientation) {
+		a_camera->SetState(a_thirdState);
+		a_thirdState->freeRotation.x = PI - 0.5f;
+		a_thirdState->freeRotation.y = 0.0f;
+		a_thirdState->targetZoomOffset = 0.0f;
+		a_thirdState->pitchZoomOffset = 0.1f;
+	}
 
 	autoVanityModeDelay->data.f = 10800.0f;
 	togglePOVDelay->data.f = 10800.0f;
-	overShoulderCombatPosX->data.f = Settings::offsetX;
-	overShoulderCombatAddY->data.f = Settings::offsetY;
-	overShoulderCombatPosZ->data.f = Settings::offsetZ;
-	overShoulderPosX->data.f = Settings::offsetX;
-	overShoulderPosZ->data.f = Settings::offsetZ;
-	vanityModeMinDist->data.f = Settings::distance;
-	vanityModeMaxDist->data.f = Settings::distance;
+	constexpr float referenceDistance = 182.0f;
+	const float zoomRatio = std::clamp(previewDistance / referenceDistance, 0.35f, 2.25f);
+	const float effectiveOffsetX = Settings::offsetX * zoomRatio;
+	const float effectiveOffsetY = Settings::offsetY * zoomRatio;
+	const float effectiveHeight = previewHeight * zoomRatio;
+	overShoulderCombatPosX->data.f = effectiveOffsetX;
+	overShoulderCombatAddY->data.f = effectiveOffsetY;
+	overShoulderCombatPosZ->data.f = effectiveHeight;
+	overShoulderPosX->data.f = effectiveOffsetX;
+	overShoulderPosZ->data.f = effectiveHeight;
+	vanityModeMinDist->data.f = previewDistance;
+	vanityModeMaxDist->data.f = previewDistance;
 	mouseWheelZoomSpeed->data.f = 10000.0f;
 
 	a_player->data.angle.x = 0.1f;
 	a_thirdState->posOffsetExpected = a_thirdState->posOffsetActual =
-		RE::NiPoint3(Settings::offsetX, Settings::offsetY, Settings::offsetZ);
+		RE::NiPoint3(effectiveOffsetX, effectiveOffsetY, effectiveHeight);
 
 	a_camera->worldFOV = Settings::fov;
 	a_camera->Update();
@@ -399,6 +483,9 @@ void MenuCamera::RestorePreviewLight()
 		savedLight->lodDimmer = savedLightLodDimmer;
 		savedLight->neverFades = savedLightNeverFades;
 		savedLight->affectLand = savedLightAffectLand;
+		if (savedLightPositionCaptured) {
+			savedLight->light->local.translate = savedLightLocalPosition;
+		}
 	}
 
 	savedLight.reset(static_cast<RE::BSLight*>(nullptr));
@@ -422,6 +509,8 @@ void MenuCamera::ResetSavedState()
 	smoothCamControl = false;
 	wasFirstPerson = false;
 	previewLightEnabled = false;
+	savedLightPositionCaptured = false;
 	lightStateCaptured = false;
+	cameraValuesDirty = false;
 	savedLight.reset(static_cast<RE::BSLight*>(nullptr));
 }

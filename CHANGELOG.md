@@ -1,5 +1,17 @@
 # Changelog
 
+## 1.3.0 - 2026-07-14
+
+- Added an animated Manage-mode transition and refined active-row highlighting.
+- Added responsive camera controls for rotation, zoom, and vertical framing.
+- Added a toggleable, fixed-position warm preview light.
+- Added controller navigation for the Manage camera controls.
+- Improved Swap mode with pulsing choices, first-selection highlighting, and immediate two-way swaps.
+- Fixed character rotation flashing and preserved the camera angle while zooming or changing height.
+- Fixed zoom movement so it travels toward the character instead of drifting sideways.
+- Fixed the MCM logo aspect ratio and replaced the edit glyph.
+- Suppressed and reset equipment-triggered preview animations during outfit changes.
+
 ## 1.2.0 - 2026-07-11
 
 - Added persistent List and Card views.
@@ -16,7 +28,6 @@
 - Fixed a crash when switching between List and Card views.
 - Fixed a crash when leaving an outfit's Edit page.
 - Centralized and coalesced menu redraws to prevent unsafe Scaleform panel rebuilds.
-
 ## 1.1.0 - 2026-07-11
 
 - Expanded outfit storage from 10 to 50 slots.

@@ -26,7 +26,7 @@ public:
 private:
 	bool previewRequested = false;
 	bool menuOpen = false;
-	bool allowRotation = false;
+	bool allowCameraControl = false;
 	std::vector<RE::BSFixedString> hiddenMenus;
 
 	void RequestPreview();

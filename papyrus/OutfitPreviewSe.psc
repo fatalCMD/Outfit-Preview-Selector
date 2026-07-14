@@ -90,6 +90,8 @@ int _escapeAsciiKey = 27
 string[] _menuRows
 int[] _outfitCounts
 string _lastApplyMessage = ""
+ObjectReference _previewLight
+bool _previewLightOn = false
 
 Event OnGameReload()
     Parent.OnGameReload()
@@ -118,6 +120,12 @@ Event OnPageReset(string page)
     _debugFocusOptionID = -1
     _animateOptionID = -1
     _cardViewOptionID = -1
+    If page == ""
+        LoadCustomContent("OutfitPreviewSelector32/ops_mcm_intro.swf", 0.0, 0.0)
+        Return
+    EndIf
+
+    UnloadCustomContent()
     If page == "Outfits"
         SetCursorFillMode(LEFT_TO_RIGHT)
         AddHeaderOption("Selector")
@@ -477,6 +485,13 @@ Function RegisterMenuEvents()
     RegisterForModEvent("OPS_NativeMouseMove", "OnNativeMouseMove")
     RegisterForModEvent("OPS_SetCardView", "OnSetCardView")
     RegisterForModEvent("OPS_SetIcon", "OnSetIcon")
+    RegisterForModEvent("OPS_CopyPreset", "OnManagePreset")
+    RegisterForModEvent("OPS_MovePreset", "OnManagePreset")
+    RegisterForModEvent("OPS_SwapPreset", "OnManagePreset")
+    RegisterForModEvent("OPS_DeletePreset", "OnManagePreset")
+    RegisterForModEvent("OPS_ReorderPreset", "OnManagePreset")
+    RegisterForModEvent("OPS_CameraHeightAdjusted", "OnCameraHeightAdjusted")
+    RegisterForModEvent("OPS_TogglePreviewLight", "OnTogglePreviewLight")
 EndFunction
 
 Event OnMenuReady(string eventName, string strArg, float numArg, Form sender)
@@ -484,6 +499,7 @@ Event OnMenuReady(string eventName, string strArg, float numArg, Form sender)
         Return
     EndIf
     ApplyMenuSettings()
+    PreparePreviewLight()
     RefreshMenuSlots()
     UpdateCurrentOutfit(true)
 EndEvent
@@ -553,6 +569,82 @@ Event OnClearSlot(string eventName, string strArg, float numArg, Form sender)
     UpdateCurrentOutfit(true)
 EndEvent
 
+Event OnManagePreset(string eventName, string strArg, float numArg, Form sender)
+    If !_menuOpen
+        Return
+    EndIf
+
+    int encoded = numArg as int
+    int sourceIndex = encoded / 100
+    int targetIndex = encoded - (sourceIndex * 100)
+    If sourceIndex < 0 || sourceIndex >= 50 || targetIndex < 0 || targetIndex >= 50
+        Return
+    EndIf
+
+    If eventName == "OPS_CopyPreset"
+        CopyOutfitPreset(sourceIndex, targetIndex)
+    ElseIf eventName == "OPS_MovePreset"
+        MoveOutfitPreset(sourceIndex, targetIndex)
+    ElseIf eventName == "OPS_SwapPreset"
+        SwapOutfitPresets(sourceIndex, targetIndex)
+    ElseIf eventName == "OPS_DeletePreset"
+        DeleteOutfitPreset(sourceIndex)
+    ElseIf eventName == "OPS_ReorderPreset"
+        ReorderOutfitPreset(sourceIndex, targetIndex)
+    EndIf
+
+    BuildMenuRowsCache()
+    RefreshMenuSlots()
+    UpdateCurrentOutfit(true)
+EndEvent
+
+Event OnCameraHeightAdjusted(string eventName, string strArg, float numArg, Form sender)
+    CameraHeight = numArg
+EndEvent
+
+Event OnTogglePreviewLight(string eventName, string strArg, float numArg, Form sender)
+    If !_menuOpen
+        Return
+    EndIf
+    If !_previewLight
+        PreparePreviewLight()
+    EndIf
+    _previewLightOn = numArg > 0.0
+    If _previewLightOn && _previewLight
+        _previewLight.EnableNoWait()
+    ElseIf _previewLight
+        _previewLight.DisableNoWait()
+    EndIf
+EndEvent
+
+Function PreparePreviewLight()
+    CleanupPreviewLight()
+    Actor player = Game.GetPlayer()
+    Form previewLightBase = Game.GetForm(0x00094E66)
+    If !player || !previewLightBase
+        Return
+    EndIf
+    _previewLight = player.PlaceAtMe(previewLightBase, 1, false, true)
+    If !_previewLight
+        Return
+    EndIf
+    float localX = -70.0
+    float localY = -25.0
+    float worldX = localX * Math.Cos(_lastPlayerZ) + localY * Math.Sin(_lastPlayerZ)
+    float worldY = localY * Math.Cos(_lastPlayerZ) - localX * Math.Sin(_lastPlayerZ)
+    _previewLight.SetPosition(player.GetPositionX() + worldX, player.GetPositionY() + worldY, player.GetPositionZ() + 110.0)
+    _previewLightOn = false
+EndFunction
+
+Function CleanupPreviewLight()
+    If _previewLight
+        _previewLight.DisableNoWait()
+        _previewLight.Delete()
+        _previewLight = None
+    EndIf
+    _previewLightOn = false
+EndFunction
+
 Event OnCloseMenu(string eventName, string strArg, float numArg, Form sender)
     If _menuOpen
         UI.CloseCustomMenu()
@@ -579,6 +671,7 @@ Function CloseSelectorState()
     If !_menuOpen
         Return
     EndIf
+    CleanupPreviewLight()
     _currentOutfit = FindCurrentOutfit()
     UnregisterForKey(_escapeKey)
     UnregisterForKey(_escapeAsciiKey)
@@ -815,6 +908,116 @@ Function ClearOutfit(int index)
     EndWhile
     UpdateMenuRowCache(index)
     Notify("Cleared " + GetOutfitName(index))
+EndFunction
+
+Function CopyOutfitPreset(int sourceIndex, int targetIndex)
+    If sourceIndex == targetIndex
+        Return
+    EndIf
+    CopyForms(GetOutfitArray(sourceIndex), GetOutfitArray(targetIndex))
+    OutfitNames[targetIndex] = GetOutfitName(sourceIndex) + " Copy"
+    OutfitIcons[targetIndex] = GetOutfitIcon(sourceIndex)
+    Notify("Copied " + GetOutfitName(sourceIndex) + " to " + SlotNum(targetIndex))
+EndFunction
+
+Function MoveOutfitPreset(int sourceIndex, int targetIndex)
+    If sourceIndex == targetIndex
+        Return
+    EndIf
+    string movedName = GetOutfitName(sourceIndex)
+    CopyForms(GetOutfitArray(sourceIndex), GetOutfitArray(targetIndex))
+    OutfitNames[targetIndex] = movedName
+    OutfitIcons[targetIndex] = GetOutfitIcon(sourceIndex)
+    ResetOutfitPreset(sourceIndex)
+    Notify("Moved " + movedName + " to " + SlotNum(targetIndex))
+EndFunction
+
+Function SwapOutfitPresets(int sourceIndex, int targetIndex)
+    If sourceIndex == targetIndex
+        Return
+    EndIf
+    Form[] temporaryItems = new Form[32]
+    CopyForms(GetOutfitArray(sourceIndex), temporaryItems)
+    string temporaryName = GetOutfitName(sourceIndex)
+    string temporaryIcon = GetOutfitIcon(sourceIndex)
+
+    CopyPresetRaw(targetIndex, sourceIndex)
+    CopyForms(temporaryItems, GetOutfitArray(targetIndex))
+    OutfitNames[targetIndex] = temporaryName
+    OutfitIcons[targetIndex] = temporaryIcon
+    Notify("Swapped " + SlotNum(sourceIndex) + " and " + SlotNum(targetIndex))
+EndFunction
+
+Function DeleteOutfitPreset(int index)
+    string deletedName = GetOutfitName(index)
+    ResetOutfitPreset(index)
+    Notify("Deleted " + deletedName)
+EndFunction
+
+Function ReorderOutfitPreset(int sourceIndex, int targetIndex)
+    If sourceIndex == targetIndex
+        Return
+    EndIf
+    Form[] temporaryItems = new Form[32]
+    CopyForms(GetOutfitArray(sourceIndex), temporaryItems)
+    string temporaryName = GetOutfitName(sourceIndex)
+    string temporaryIcon = GetOutfitIcon(sourceIndex)
+
+    int i = sourceIndex
+    If sourceIndex < targetIndex
+        While i < targetIndex
+            CopyPresetRaw(i + 1, i)
+            i += 1
+        EndWhile
+    Else
+        While i > targetIndex
+            CopyPresetRaw(i - 1, i)
+            i -= 1
+        EndWhile
+    EndIf
+
+    CopyForms(temporaryItems, GetOutfitArray(targetIndex))
+    OutfitNames[targetIndex] = temporaryName
+    OutfitIcons[targetIndex] = temporaryIcon
+    Notify("Reordered " + temporaryName + " to " + SlotNum(targetIndex))
+EndFunction
+
+Function CopyPresetRaw(int sourceIndex, int targetIndex)
+    CopyForms(GetOutfitArray(sourceIndex), GetOutfitArray(targetIndex))
+    OutfitNames[targetIndex] = GetOutfitName(sourceIndex)
+    OutfitIcons[targetIndex] = GetOutfitIcon(sourceIndex)
+EndFunction
+
+Function ResetOutfitPreset(int index)
+    ClearForms(GetOutfitArray(index))
+    OutfitNames[index] = "Outfit " + (index + 1)
+    OutfitIcons[index] = "auto"
+EndFunction
+
+Function CopyForms(Form[] sourceItems, Form[] targetItems)
+    If !targetItems
+        Return
+    EndIf
+    ClearForms(targetItems)
+    If !sourceItems
+        Return
+    EndIf
+    int i = 0
+    While i < sourceItems.Length && i < targetItems.Length
+        targetItems[i] = sourceItems[i]
+        i += 1
+    EndWhile
+EndFunction
+
+Function ClearForms(Form[] items)
+    If !items
+        Return
+    EndIf
+    int i = 0
+    While i < items.Length
+        items[i] = None
+        i += 1
+    EndWhile
 EndFunction
 
 bool Function ApplyOutfit(int index)

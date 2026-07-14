@@ -2,13 +2,14 @@
 
 Outfit Preview Selector (OPS) is a Skyrim Special Edition outfit manager built around a paused third-person character preview. It provides fifty named outfit slots, applies outfits without closing the selector, and highlights an outfit only while the player is wearing exactly its saved armor set.
 
-Current public version: **1.2.0**
+Current public version: **1.3.0**
 
 The current source targets Skyrim Special Edition 1.5.97 with SKSE64 2.0.20. Anniversary Edition and Skyrim VR are not currently supported.
 
 ## Features
 
 - Fifty persistent, renameable outfit slots presented across five ten-outfit pages.
+- Manage mode with copy, move, swap, delete, and cross-page drag reordering.
 - Switchable list and card layouts with automatic or manually selected outfit-category icons.
 - Full 2D controller card navigation with a physical `Y` / Triangle edit shortcut and on-screen prompt.
 - Compact mouse and controller-friendly pagination with adjacent arrows.
@@ -17,10 +18,13 @@ The current source targets Skyrim Special Edition 1.5.97 with SKSE64 2.0.20. Ann
 - Outfit switching without closing the selector.
 - Exact worn-outfit highlighting.
 - Paused third-person preview with mouse and gamepad rotation.
+- Manage-mode controls for character rotation, centered zoom, and vertical framing.
+- Toggleable warm preview light anchored above and to the character's left.
 - Saved MCM controls for preview camera horizontal position and height.
 - Automatic restoration of the last list/card layout, also configurable from MCM.
 - Reversible suppression of other registered HUD/mod overlay movies while OPS is open.
 - Optional player animation during the paused preview.
+- Automatic suppression and reset of equipment-triggered animations during outfit changes.
 - Guarded Faster HDT-SMP 2.5 preview-physics support.
 - MCM configuration for controls and behavior.
 - Event-driven equipment checks with no continuous Papyrus polling.

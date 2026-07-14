@@ -3,6 +3,13 @@
 class MenuCamera
 {
 public:
+	enum class ControlMode : std::uint32_t
+	{
+		kRotate = 0,
+		kZoom = 1,
+		kVertical = 2
+	};
+
 	static MenuCamera& GetSingleton();
 
 	bool Start();
@@ -10,7 +17,13 @@ public:
 	void ApplySettings();
 	void SetPreviewLight(bool a_enable);
 	void SetUserOffsets(float a_side, float a_height);
+	void SetControlMode(std::uint32_t a_mode);
+	void AdjustZoom(float a_delta);
+	void AdjustHeight(float a_delta);
+	void RotateCharacter(float a_radians);
 	[[nodiscard]] bool IsActive() const;
+	[[nodiscard]] ControlMode GetControlMode() const;
+	[[nodiscard]] float GetPreviewHeight() const;
 
 private:
 	RE::Setting* overShoulderCombatPosX = nullptr;
@@ -27,6 +40,7 @@ private:
 	RE::NiPoint2 freeRotation{};
 	RE::NiPoint3 posOffsetExpected{};
 	RE::NiPointer<RE::BSLight> savedLight;
+	RE::NiPoint3 savedLightLocalPosition{};
 	RE::NiColor savedLightAmbient{};
 	RE::NiColor savedLightDiffuse{};
 	RE::NiPoint3 savedLightRadius{};
@@ -49,6 +63,8 @@ private:
 	float savedVanityModeMaxDist = 0.0f;
 	float savedMouseWheelZoomSpeed = 0.0f;
 	float savedTogglePOVDelay = 0.0f;
+	float previewDistance = 182.0f;
+	float previewHeight = -24.0f;
 
 	bool active = false;
 	bool smoothCamControl = false;
@@ -62,12 +78,15 @@ private:
 	bool lightStateCaptured = false;
 	bool savedLightNeverFades = false;
 	bool savedLightAffectLand = false;
+	bool savedLightPositionCaptured = false;
+	bool cameraValuesDirty = false;
+	ControlMode controlMode = ControlMode::kRotate;
 
 	[[nodiscard]] bool CaptureINISettings();
 	[[nodiscard]] bool CaptureState(RE::PlayerCharacter* a_player, RE::PlayerCamera* a_camera, RE::ThirdPersonState* a_thirdState);
 	[[nodiscard]] bool CaptureLightState(RE::PlayerCharacter* a_player);
 	void ApplyPreviewLight(RE::PlayerCharacter* a_player);
-	void ApplyCameraValues(RE::PlayerCharacter* a_player, RE::PlayerCamera* a_camera, RE::ThirdPersonState* a_thirdState);
+	void ApplyCameraValues(RE::PlayerCharacter* a_player, RE::PlayerCamera* a_camera, RE::ThirdPersonState* a_thirdState, bool a_resetOrientation);
 	void RestorePreviewLight();
 	void ResetSavedState();
 };
